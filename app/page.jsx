@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Plus, Trash2, RotateCcw, MapPin, Calendar, PiggyBank, CalendarDays, Wallet, Luggage, Check, ExternalLink, Link2, ArrowRight, CheckCheck } from "lucide-react";
+import { Plus, Trash2, RotateCcw, MapPin, Calendar, PiggyBank, CalendarDays, Wallet, Luggage, Check, ExternalLink, Link2, ArrowRight, CheckCheck, X, Camera, UserPlus, Users } from "lucide-react";
 
 // ── Storage bridge: same API the planner used in Claude, backed by /api/trip ──
 if (typeof window !== "undefined" && !window.storage) {
@@ -25,13 +25,21 @@ const KEY = "cute-trip-planner-v1";
 const AVATAR = ["bg-rose-400", "bg-orange-400", "bg-amber-400", "bg-emerald-500", "bg-teal-500", "bg-sky-500", "bg-indigo-500", "bg-violet-500"];
 const DAY_TINT = ["bg-indigo-100 text-indigo-700", "bg-emerald-100 text-emerald-700", "bg-amber-100 text-amber-700", "bg-rose-100 text-rose-700", "bg-sky-100 text-sky-700", "bg-violet-100 text-violet-700"];
 const CATS = ["Stay", "Transport", "Food", "Activities", "Shopping", "Other"];
-const CAT_TINT = { Stay: "bg-indigo-50 text-indigo-700", Transport: "bg-sky-50 text-sky-700", Food: "bg-amber-50 text-amber-700", Activities: "bg-emerald-50 text-emerald-700", Shopping: "bg-rose-50 text-rose-700", Other: "bg-slate-100 text-slate-600" };
+const CAT_TINT = {
+  Stay: "bg-indigo-50 text-indigo-700",
+  Transport: "bg-sky-50 text-sky-700",
+  Food: "bg-amber-50 text-amber-700",
+  Activities: "bg-emerald-50 text-emerald-700",
+  Shopping: "bg-rose-50 text-rose-700",
+  Other: "bg-slate-100 text-slate-600",
+};
 const NO_DECIMALS = ["IDR", "JPY", "KRW", "VND"];
 const MONTHS = 12;
 
 const uid = () => Math.random().toString(36).slice(2, 9);
 const num = (v) => Number(v) || 0;
 const blankMonths = () => Array(MONTHS).fill("");
+const newPerson = (name) => ({ id: uid(), name, photo: "", months: blankMonths() });
 const isUrl = (s) => /^https?:\/\//i.test(String(s || "").trim());
 const thisMonth = () => {
   const d = new Date();
@@ -46,8 +54,28 @@ const nextDate = (date) => {
 };
 const blankRow = () => ({ id: uid(), time: "", place: "", link: "", activity: "", price: "", notes: "" });
 
+// Shrinks an uploaded photo to a small square JPEG so it's light to store & sync
+const resizeImage = (file, size = 128) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = reject;
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = reject;
+      img.onload = () => {
+        const s = Math.min(img.width, img.height);
+        const c = document.createElement("canvas");
+        c.width = c.height = size;
+        c.getContext("2d").drawImage(img, (img.width - s) / 2, (img.height - s) / 2, s, s, 0, 0, size, size);
+        resolve(c.toDataURL("image/jpeg", 0.8));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+
 const defaults = () => {
-  const people = Array.from({ length: 8 }, (_, i) => ({ name: `Person ${i + 1}`, months: blankMonths() }));
+  const people = Array.from({ length: 8 }, (_, i) => newPerson(`Person ${i + 1}`));
   return {
     trip: { name: "Group Trip", dest: "", start: "", end: "", saveStart: thisMonth(), monthly: "" },
     currencies: [
@@ -82,8 +110,10 @@ const migrate = (s) => {
   const d = defaults();
   const out = { ...d, ...s, trip: { ...d.trip, ...(s.trip || {}) } };
   out.currencies = Array.isArray(s.currencies) && s.currencies.length ? s.currencies : d.currencies;
-  out.people = (s.people || d.people).map((p) => ({
-    name: p.name,
+  out.people = (Array.isArray(s.people) && s.people.length ? s.people : d.people).map((p) => ({
+    id: p.id || uid(),
+    name: p.name ?? "",
+    photo: p.photo || "",
     months: Array.isArray(p.months) ? [...p.months, ...blankMonths()].slice(0, MONTHS) : [num(p.saved) || "", ...Array(MONTHS - 1).fill("")],
   }));
   if (!Array.isArray(s.days)) {
@@ -97,6 +127,7 @@ const migrate = (s) => {
     } else out.days = d.days;
   }
   delete out.itinerary;
+  const n = out.people.length;
   const all = out.people.map((_, i) => i);
   out.expenses = (s.expenses || d.expenses).map((e) => ({
     id: e.id || uid(),
@@ -104,8 +135,8 @@ const migrate = (s) => {
     item: e.item || "",
     amount: e.amount ?? e.cost ?? "",
     cur: e.cur || out.currencies[0].code,
-    paidBy: num(e.paidBy),
-    split: Array.isArray(e.split) ? e.split : all,
+    paidBy: Math.min(num(e.paidBy), n - 1),
+    split: (Array.isArray(e.split) ? e.split : all).filter((i) => i < n),
     settled: !!e.settled,
   }));
   return out;
@@ -114,14 +145,22 @@ const migrate = (s) => {
 // Minimal list of transfers to settle balances
 const settle = (bal, dec) => {
   const eps = dec === 0 ? 0.5 : 0.005;
-  const cr = bal.map((v, i) => ({ i, v })).filter((x) => x.v > eps).sort((a, b) => b.v - a.v);
-  const db = bal.map((v, i) => ({ i, v: -v })).filter((x) => x.v > eps).sort((a, b) => b.v - a.v);
+  const cr = bal
+    .map((v, i) => ({ i, v }))
+    .filter((x) => x.v > eps)
+    .sort((a, b) => b.v - a.v);
+  const db = bal
+    .map((v, i) => ({ i, v: -v }))
+    .filter((x) => x.v > eps)
+    .sort((a, b) => b.v - a.v);
   const out = [];
-  let x = 0, y = 0;
+  let x = 0,
+    y = 0;
   while (x < db.length && y < cr.length) {
     const m = Math.min(db[x].v, cr[y].v);
     out.push({ from: db[x].i, to: cr[y].i, amt: m });
-    db[x].v -= m; cr[y].v -= m;
+    db[x].v -= m;
+    cr[y].v -= m;
     if (db[x].v <= eps) x++;
     if (cr[y].v <= eps) y++;
   }
@@ -155,15 +194,14 @@ const Stat = ({ label, value, accent, sub }) => (
   </div>
 );
 
-const Avatar = ({ name, i, size = "w-7 h-7 text-xs", className = "" }) => (
-  <span className={`inline-flex ${size} shrink-0 rounded-full ${AVATAR[i % 8]} text-white font-semibold items-center justify-center ${className}`}>
-    {(name || "?").trim().charAt(0).toUpperCase() || "?"}
-  </span>
-);
+const Avatar = ({ person, i, size = "w-7 h-7 text-xs", className = "" }) =>
+  person?.photo ? (
+    <img src={person.photo} alt={person.name || "Traveler"} className={`${size} shrink-0 rounded-full object-cover bg-slate-100 ${className}`} />
+  ) : (
+    <span className={`inline-flex ${size} shrink-0 rounded-full ${AVATAR[i % 8]} text-white font-semibold items-center justify-center ${className}`}>{(person?.name || "?").trim().charAt(0).toUpperCase() || "?"}</span>
+  );
 
-const TH = ({ children, className = "" }) => (
-  <th className={`px-3 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide ${className}`}>{children}</th>
-);
+const TH = ({ children, className = "" }) => <th className={`px-3 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide ${className}`}>{children}</th>;
 
 const Btn = ({ onClick, children, color }) => (
   <button onClick={onClick} className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-medium text-white ${color} transition`}>
@@ -172,12 +210,13 @@ const Btn = ({ onClick, children, color }) => (
 );
 
 const Del = ({ onClick, title = "Delete" }) => (
-  <button onClick={onClick} title={title} className="p-1.5 rounded-md text-slate-300 hover:text-rose-500 hover:bg-rose-50 transition"><Trash2 size={15} /></button>
+  <button onClick={onClick} title={title} className="p-1.5 rounded-md text-slate-300 hover:text-rose-500 hover:bg-rose-50 transition">
+    <Trash2 size={15} />
+  </button>
 );
 
 const Select = ({ value, onChange, children, className = "" }) => (
-  <select value={value} onChange={(e) => onChange(e.target.value)}
-    className={`text-sm rounded-md px-2 py-1.5 border-0 focus:outline-none focus:ring-2 focus:ring-indigo-300 cursor-pointer ${className}`}>
+  <select value={value} onChange={(e) => onChange(e.target.value)} className={`text-sm rounded-md px-2 py-1.5 border-0 focus:outline-none focus:ring-2 focus:ring-indigo-300 cursor-pointer ${className}`}>
     {children}
   </select>
 );
@@ -189,6 +228,7 @@ export default function App() {
   const [status, setStatus] = useState("");
   const [linkEdit, setLinkEdit] = useState(null);
   const [settleMode, setSettleMode] = useState("separate");
+  const [showPeople, setShowPeople] = useState(false);
 
   // ── Shared storage: everyone with the link sees & edits the same data ──
   const SHARED_KEY = "group-trip-shared-v1";
@@ -210,7 +250,9 @@ export default function App() {
         } catch (e) {}
       }
       if (raw) {
-        try { setData(migrate(JSON.parse(raw))); } catch (e) {}
+        try {
+          setData(migrate(JSON.parse(raw)));
+        } catch (e) {}
       }
       setLoaded(true);
     })();
@@ -219,7 +261,10 @@ export default function App() {
   // Save changes to shared storage
   useEffect(() => {
     if (!loaded) return;
-    if (fromRemote.current) { fromRemote.current = false; return; }
+    if (fromRemote.current) {
+      fromRemote.current = false;
+      return;
+    }
     lastEdit.current = Date.now();
     setStatus("Saving…");
     const t = setTimeout(async () => {
@@ -262,7 +307,54 @@ export default function App() {
   const upd = (k, i, f, v) => setData((d) => ({ ...d, [k]: d[k].map((r, j) => (j === i ? { ...r, [f]: v } : r)) }));
   const add = (k, row) => setData((d) => ({ ...d, [k]: [...d[k], row] }));
   const del = (k, i) => setData((d) => ({ ...d, [k]: d[k].filter((_, j) => j !== i) }));
-  const reset = () => { if (confirm("Reset everything to the starter template? This clears it for ALL friends.")) setData(defaults()); };
+  const reset = () => {
+    if (confirm("Reset everything to the starter template? This clears it for ALL friends.")) setData(defaults());
+  };
+
+  // ── travelers ──
+  const addPerson = () => setData((d) => ({ ...d, people: [...d.people, newPerson(`Person ${d.people.length + 1}`)] }));
+  const renamePerson = (i, v) =>
+    setData((d) => {
+      const old = d.people[i].name;
+      return {
+        ...d,
+        people: d.people.map((p, j) => (j === i ? { ...p, name: v } : p)),
+        packing: d.packing.map((r) => (old && r.who === old ? { ...r, who: v } : r)),
+      };
+    });
+  const removePerson = (pi) => {
+    const p = people[pi];
+    const label = p.name || "This traveler";
+    if (people.length <= 1) {
+      alert("You need at least 1 traveler.");
+      return;
+    }
+    const paidCount = expenses.filter((e) => e.paidBy === pi && num(e.amount) > 0).length;
+    if (paidCount) {
+      alert(`${label} paid for ${paidCount} expense${paidCount > 1 ? "s" : ""}. Change "Paid by" on ${paidCount > 1 ? "those" : "that"} first, then remove them.`);
+      return;
+    }
+    if (!confirm(`Remove ${label}? Their savings will be deleted and they'll be taken out of every expense split.`)) return;
+    setData((d) => ({
+      ...d,
+      people: d.people.filter((_, j) => j !== pi),
+      expenses: d.expenses.map((e) => ({
+        ...e,
+        paidBy: e.paidBy > pi ? e.paidBy - 1 : e.paidBy === pi ? 0 : e.paidBy,
+        split: e.split.filter((x) => x !== pi).map((x) => (x > pi ? x - 1 : x)),
+      })),
+      packing: d.packing.map((r) => (r.who === p.name ? { ...r, who: "Everyone" } : r)),
+    }));
+  };
+  const setPhoto = async (pi, file) => {
+    if (!file) return;
+    try {
+      const photo = await resizeImage(file);
+      setData((d) => ({ ...d, people: d.people.map((p, j) => (j === pi ? { ...p, photo } : p)) }));
+    } catch (e) {
+      alert("Couldn't read that image. Try a JPG or PNG photo.");
+    }
+  };
 
   // ── savings ──
   const updMonth = (i, m, v) => setData((d) => ({ ...d, people: d.people.map((p, j) => (j === i ? { ...p, months: p.months.map((x, k) => (k === m ? v : x)) } : p)) }));
@@ -288,22 +380,25 @@ export default function App() {
     const dec = decOf(c.code);
     return `${c.symbol}${num(n).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: dec })}`;
   };
-  const updCur = (ci, f, v) => setData((d) => {
-    const old = d.currencies[ci].code;
-    const cs = d.currencies.map((c, j) => (j === ci ? { ...c, [f]: v } : c));
-    const ex = f === "code" ? d.expenses.map((e) => (e.cur === old ? { ...e, cur: v } : e)) : d.expenses;
-    return { ...d, currencies: cs, expenses: ex };
-  });
-  const delCur = (ci) => setData((d) => {
-    const code = d.currencies[ci].code;
-    return { ...d, currencies: d.currencies.filter((_, j) => j !== ci), expenses: d.expenses.map((e) => (e.cur === code ? { ...e, cur: d.currencies[0].code } : e)) };
-  });
+  const updCur = (ci, f, v) =>
+    setData((d) => {
+      const old = d.currencies[ci].code;
+      const cs = d.currencies.map((c, j) => (j === ci ? { ...c, [f]: v } : c));
+      const ex = f === "code" ? d.expenses.map((e) => (e.cur === old ? { ...e, cur: v } : e)) : d.expenses;
+      return { ...d, currencies: cs, expenses: ex };
+    });
+  const delCur = (ci) =>
+    setData((d) => {
+      const code = d.currencies[ci].code;
+      return { ...d, currencies: d.currencies.filter((_, j) => j !== ci), expenses: d.expenses.map((e) => (e.cur === code ? { ...e, cur: d.currencies[0].code } : e)) };
+    });
 
   // ── expenses ──
-  const toggleSplit = (ei, pi) => setData((d) => ({
-    ...d,
-    expenses: d.expenses.map((e, j) => (j !== ei ? e : { ...e, split: e.split.includes(pi) ? e.split.filter((x) => x !== pi) : [...e.split, pi].sort((a, b) => a - b) })),
-  }));
+  const toggleSplit = (ei, pi) =>
+    setData((d) => ({
+      ...d,
+      expenses: d.expenses.map((e, j) => (j !== ei ? e : { ...e, split: e.split.includes(pi) ? e.split.filter((x) => x !== pi) : [...e.split, pi].sort((a, b) => a - b) })),
+    }));
   const setSplitAll = (ei, all) => upd("expenses", ei, "split", all ? people.map((_, i) => i) : []);
   const settleGroup = (code) => setData((d) => ({ ...d, expenses: d.expenses.map((e) => (!e.settled && (code === "__ALL__" || e.cur === code) ? { ...e, settled: true } : e)) }));
 
@@ -312,7 +407,7 @@ export default function App() {
     expenses.forEach((e) => {
       const amt = num(e.amount);
       const split = e.split.filter((i) => i < people.length);
-      if (e.settled || !amt || !split.length) return;
+      if (e.settled || !amt || !split.length || e.paidBy >= people.length) return;
       let a = amt;
       if (code === "__ALL__") a = amt * rateOf(e.cur);
       else if (e.cur !== code) return;
@@ -325,7 +420,8 @@ export default function App() {
   // ── calculations ──
   let countdown = null;
   if (trip.start) {
-    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
     const diff = Math.ceil((new Date(trip.start + "T00:00:00") - today) / 86400000);
     countdown = diff > 0 ? `${diff} day${diff === 1 ? "" : "s"} to go` : diff === 0 ? "Trip starts today" : "Trip completed";
   }
@@ -357,9 +453,10 @@ export default function App() {
   const perCur = currencies.map((c) => ({ code: c.code, total: expenses.filter((e) => e.cur === c.code).reduce((s, e) => s + num(e.amount), 0) })).filter((x) => x.total);
   const unsettled = expenses.filter((e) => !e.settled && num(e.amount) > 0);
   const missingRate = currencies.slice(1).some((c) => !num(c.rate));
-  const settleGroups = settleMode === "combined"
-    ? [{ code: "__ALL__", label: `All currencies → ${home.code}`, fmtCode: home.code }]
-    : currencies.filter((c) => unsettled.some((e) => e.cur === c.code)).map((c) => ({ code: c.code, label: c.code, fmtCode: c.code }));
+  const settleGroups =
+    settleMode === "combined"
+      ? [{ code: "__ALL__", label: `All currencies → ${home.code}`, fmtCode: home.code }]
+      : currencies.filter((c) => unsettled.some((e) => e.cur === c.code)).map((c) => ({ code: c.code, label: c.code, fmtCode: c.code }));
 
   const packed = packing.filter((p) => p.done).length;
 
@@ -371,11 +468,7 @@ export default function App() {
   ];
 
   if (!loaded) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center text-sm text-slate-400">
-        Loading trip…
-      </div>
-    );
+    return <div className="min-h-screen bg-slate-50 flex items-center justify-center text-sm text-slate-400">Loading trip…</div>;
   }
 
   return (
@@ -401,11 +494,20 @@ export default function App() {
                 <Cell type="date" value={trip.end} onChange={(v) => setTrip("end", v)} className="w-36" />
               </label>
             </div>
-            <div className="flex items-center mt-4">
-              <div className="flex -space-x-1.5">
-                {people.map((p, i) => <span key={i} title={p.name} className="ring-2 ring-white rounded-full"><Avatar name={p.name} i={i} /></span>)}
-              </div>
-              <span className="text-sm text-slate-500 ml-3">{people.length} travelers</span>
+            <div className="flex flex-wrap items-center gap-y-2 mt-4">
+              <button onClick={() => setShowPeople(true)} className="flex -space-x-1.5" title="Manage travelers">
+                {people.map((p, i) => (
+                  <span key={p.id} title={p.name} className="ring-2 ring-white rounded-full">
+                    <Avatar person={p} i={i} />
+                  </span>
+                ))}
+              </button>
+              <span className="text-sm text-slate-500 ml-3">
+                {people.length} traveler{people.length === 1 ? "" : "s"}
+              </span>
+              <button onClick={() => setShowPeople(true)} className="ml-3 inline-flex items-center gap-1.5 text-sm font-medium text-indigo-600 hover:bg-indigo-50 px-2.5 py-1 rounded-md">
+                <Users size={15} /> Manage
+              </button>
             </div>
           </div>
         </div>
@@ -414,15 +516,20 @@ export default function App() {
         <div className="flex items-end justify-between mt-6 border-b border-slate-200">
           <div className="flex gap-1 overflow-x-auto">
             {tabs.map(({ id, label, Icon, on }) => (
-              <button key={id} onClick={() => setTab(id)}
-                className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition ${tab === id ? on : "border-transparent text-slate-500 hover:text-slate-700"}`}>
+              <button
+                key={id}
+                onClick={() => setTab(id)}
+                className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition ${tab === id ? on : "border-transparent text-slate-500 hover:text-slate-700"}`}
+              >
                 <Icon size={16} /> {label}
               </button>
             ))}
           </div>
           <div className="flex items-center gap-3 pb-2 shrink-0">
             <span className="text-xs text-slate-400 hidden sm:inline">{status}</span>
-            <button onClick={reset} title="Reset" className="p-1.5 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100"><RotateCcw size={15} /></button>
+            <button onClick={reset} title="Reset" className="p-1.5 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100">
+              <RotateCcw size={15} />
+            </button>
           </div>
         </div>
 
@@ -433,8 +540,12 @@ export default function App() {
               <div className="bg-white rounded-xl border border-slate-200 p-4 flex flex-wrap gap-x-6 gap-y-3 items-center">
                 <label className="flex items-center gap-2 text-sm">
                   <span className="text-slate-500 font-medium">Start saving from</span>
-                  <input type="month" value={trip.saveStart} onChange={(e) => setTrip("saveStart", e.target.value || thisMonth())}
-                    className="text-sm bg-slate-50 border border-slate-200 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-300" />
+                  <input
+                    type="month"
+                    value={trip.saveStart}
+                    onChange={(e) => setTrip("saveStart", e.target.value || thisMonth())}
+                    className="text-sm bg-slate-50 border border-slate-200 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-300"
+                  />
                 </label>
                 <label className="flex items-center gap-2 text-sm">
                   <span className="text-slate-500 font-medium">Monthly amount per person</span>
@@ -443,13 +554,19 @@ export default function App() {
                     <Cell type="number" value={trip.monthly} onChange={(v) => setTrip("monthly", v)} className="w-32" placeholder="Not decided yet" />
                   </div>
                 </label>
-                <span className="text-xs text-slate-400">12 months · {monthLabels[0].short} {monthLabels[0].year} – {monthLabels[11].short} {monthLabels[11].year} · in {home.code}</span>
+                <span className="text-xs text-slate-400">
+                  12 months · {monthLabels[0].short} {monthLabels[0].year} – {monthLabels[11].short} {monthLabels[11].year} · in {home.code}
+                </span>
               </div>
 
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 <Stat label="Total saved" value={fmt(totalSaved)} accent="bg-emerald-500" sub={`${fmt(totalSaved / people.length)} avg per person`} />
-                <Stat label={curLabel ? `${curLabel} collected` : "This month"} value={curLabel ? fmt(monthTotal(curIdx)) : "—"} accent="bg-teal-500"
-                  sub={curLabel ? `${paidThisMonth} of ${people.length} have paid` : curIdx < 0 ? "Saving hasn't started" : "Saving period ended"} />
+                <Stat
+                  label={curLabel ? `${curLabel} collected` : "This month"}
+                  value={curLabel ? fmt(monthTotal(curIdx)) : "—"}
+                  accent="bg-teal-500"
+                  sub={curLabel ? `${paidThisMonth} of ${people.length} have paid` : curIdx < 0 ? "Saving hasn't started" : "Saving period ended"}
+                />
                 <Stat label="Group target" value={monthly ? fmt(groupTarget) : "Not set"} accent="bg-amber-400" sub={monthly ? `${fmt(monthly * MONTHS)} per person` : "Set a monthly amount above"} />
                 <Stat label="Months left" value={monthsLeft} accent="bg-indigo-400" sub={curLabel ? `Currently month ${curIdx + 1} of 12` : null} />
               </div>
@@ -472,7 +589,7 @@ export default function App() {
                       {monthLabels.map((m, k) => (
                         <th key={k} className={`px-1 py-2 text-center text-xs font-semibold ${k === curIdx ? "bg-emerald-100 text-emerald-700" : "text-slate-500"}`}>
                           <div className="uppercase tracking-wide">{m.short}</div>
-                          <div className="font-normal opacity-60">'{m.year}</div>
+                          <div className="font-normal opacity-60">&apos;{m.year}</div>
                         </th>
                       ))}
                       <TH className="text-right bg-slate-100">Total</TH>
@@ -482,11 +599,11 @@ export default function App() {
                     {people.map((p, i) => {
                       const t = personTotal(p);
                       return (
-                        <tr key={i}>
+                        <tr key={p.id}>
                           <td className="px-3 py-1 sticky left-0 bg-white z-10 border-r border-slate-100">
                             <div className="flex items-center gap-2">
-                              <Avatar name={p.name} i={i} />
-                              <Cell value={p.name} onChange={(v) => upd("people", i, "name", v)} className="font-medium w-28" />
+                              <Avatar person={p} i={i} />
+                              <Cell value={p.name} onChange={(v) => renamePerson(i, v)} className="font-medium w-28" placeholder="Name" />
                             </div>
                           </td>
                           {p.months.map((v, k) => (
@@ -498,7 +615,11 @@ export default function App() {
                           ))}
                           <td className="px-3 text-sm text-right font-semibold bg-slate-50">
                             {fmt(t)}
-                            {monthly > 0 && <div className="mt-1 w-20 ml-auto"><Bar pct={(t / (monthly * MONTHS)) * 100} color="bg-emerald-500" /></div>}
+                            {monthly > 0 && (
+                              <div className="mt-1 w-20 ml-auto">
+                                <Bar pct={(t / (monthly * MONTHS)) * 100} color="bg-emerald-500" />
+                              </div>
+                            )}
                           </td>
                         </tr>
                       );
@@ -518,11 +639,26 @@ export default function App() {
                 </table>
               </div>
 
-              <div className="flex flex-wrap gap-4 text-xs text-slate-500">
-                <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-emerald-100 border border-emerald-200" /> Paid</span>
-                {monthly > 0 && <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-amber-100 border border-amber-200" /> Paid less than {fmt(monthly)}</span>}
-                <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-rose-100 border border-rose-200" /> Missed (past month)</span>
-                <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded bg-emerald-200" /> Current month</span>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap gap-4 text-xs text-slate-500">
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-3 h-3 rounded bg-emerald-100 border border-emerald-200" /> Paid
+                  </span>
+                  {monthly > 0 && (
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-3 h-3 rounded bg-amber-100 border border-amber-200" /> Paid less than {fmt(monthly)}
+                    </span>
+                  )}
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-3 h-3 rounded bg-rose-100 border border-rose-200" /> Missed (past month)
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-3 h-3 rounded bg-emerald-200" /> Current month
+                  </span>
+                </div>
+                <button onClick={() => setShowPeople(true)} className="inline-flex items-center gap-1.5 text-sm font-medium text-emerald-600 hover:bg-emerald-50 px-2.5 py-1 rounded-md">
+                  <Users size={15} /> Add / remove travelers
+                </button>
               </div>
             </div>
           )}
@@ -556,37 +692,62 @@ export default function App() {
                               {day.date && <div className="text-base font-semibold text-slate-800 mt-2 px-2 capitalize">{weekday(day.date)}</div>}
                               <Cell type="date" value={day.date} onChange={(v) => updDay(di, "date", v)} className="text-slate-500 w-40" />
                               <Cell value={day.label} onChange={(v) => updDay(di, "label", v)} className="text-xs text-slate-500" placeholder="Day title (optional)" />
-                              <div className="text-xs text-slate-400 px-2 mt-1">{day.rows.length} stop{day.rows.length === 1 ? "" : "s"}</div>
+                              <div className="text-xs text-slate-400 px-2 mt-1">
+                                {day.rows.length} stop{day.rows.length === 1 ? "" : "s"}
+                              </div>
                             </td>
                           )}
                           {r ? (
                             <>
-                              <td className="px-1 py-0.5 align-top"><Cell value={r.time} onChange={(v) => updRow(di, ri, "time", v)} className="w-32 tabular-nums" placeholder="11.00 - 13.30" /></td>
+                              <td className="px-1 py-0.5 align-top">
+                                <Cell value={r.time} onChange={(v) => updRow(di, ri, "time", v)} className="w-32 tabular-nums" placeholder="11.00 - 13.30" />
+                              </td>
                               <td className="px-1 py-0.5 align-top min-w-56">
                                 <div className="flex items-center gap-0.5">
                                   <Cell value={r.place} onChange={(v) => updRow(di, ri, "place", v)} className={r.link ? "text-indigo-600 underline underline-offset-2" : ""} placeholder="Place" />
                                   {r.link && isUrl(r.link) && (
-                                    <a href={r.link} target="_blank" rel="noreferrer" title="Open link" className="p-1 text-indigo-500 hover:bg-indigo-50 rounded"><ExternalLink size={14} /></a>
+                                    <a href={r.link} target="_blank" rel="noreferrer" title="Open link" className="p-1 text-indigo-500 hover:bg-indigo-50 rounded">
+                                      <ExternalLink size={14} />
+                                    </a>
                                   )}
-                                  <button onClick={() => setLinkEdit(linkEdit === r.id ? null : r.id)} title="Add / edit link"
-                                    className={`p-1 rounded hover:bg-slate-100 ${r.link ? "text-indigo-400" : "text-slate-300 opacity-0 group-hover:opacity-100"}`}><Link2 size={14} /></button>
+                                  <button
+                                    onClick={() => setLinkEdit(linkEdit === r.id ? null : r.id)}
+                                    title="Add / edit link"
+                                    className={`p-1 rounded hover:bg-slate-100 ${r.link ? "text-indigo-400" : "text-slate-300 opacity-0 group-hover:opacity-100"}`}
+                                  >
+                                    <Link2 size={14} />
+                                  </button>
                                 </div>
                                 {linkEdit === r.id && (
-                                  <Cell autoFocus value={r.link} onChange={(v) => updRow(di, ri, "link", v)} onBlur={() => setLinkEdit(null)}
-                                    className="text-xs text-indigo-600 bg-indigo-50 mt-0.5" placeholder="Paste link (Google Maps, website…)" />
+                                  <Cell
+                                    autoFocus
+                                    value={r.link}
+                                    onChange={(v) => updRow(di, ri, "link", v)}
+                                    onBlur={() => setLinkEdit(null)}
+                                    className="text-xs text-indigo-600 bg-indigo-50 mt-0.5"
+                                    placeholder="Paste link (Google Maps, website…)"
+                                  />
                                 )}
                               </td>
-                              <td className="px-1 py-0.5 align-top"><Cell value={r.activity} onChange={(v) => updRow(di, ri, "activity", v)} className="min-w-40" placeholder="Activity" /></td>
-                              <td className="px-1 py-0.5 align-top"><Cell value={r.price} onChange={(v) => updRow(di, ri, "price", v)} className="w-32" placeholder="RM20-40" /></td>
+                              <td className="px-1 py-0.5 align-top">
+                                <Cell value={r.activity} onChange={(v) => updRow(di, ri, "activity", v)} className="min-w-40" placeholder="Activity" />
+                              </td>
+                              <td className="px-1 py-0.5 align-top">
+                                <Cell value={r.price} onChange={(v) => updRow(di, ri, "price", v)} className="w-32" placeholder="RM20-40" />
+                              </td>
                               <td className="px-1 py-0.5 align-top min-w-64">
                                 <div className="flex items-center gap-0.5">
                                   <Cell value={r.notes} onChange={(v) => updRow(di, ri, "notes", v)} className={isUrl(r.notes) ? "text-indigo-600 truncate" : ""} placeholder="Notes" />
                                   {isUrl(r.notes) && (
-                                    <a href={r.notes.trim()} target="_blank" rel="noreferrer" title="Open link" className="p-1 text-indigo-500 hover:bg-indigo-50 rounded"><ExternalLink size={14} /></a>
+                                    <a href={r.notes.trim()} target="_blank" rel="noreferrer" title="Open link" className="p-1 text-indigo-500 hover:bg-indigo-50 rounded">
+                                      <ExternalLink size={14} />
+                                    </a>
                                   )}
                                 </div>
                               </td>
-                              <td className="px-1 align-top pt-1 opacity-0 group-hover:opacity-100 transition"><Del onClick={() => delRow(di, ri)} title="Delete row" /></td>
+                              <td className="px-1 align-top pt-1 opacity-0 group-hover:opacity-100 transition">
+                                <Del onClick={() => delRow(di, ri)} title="Delete row" />
+                              </td>
                             </>
                           ) : (
                             <td colSpan={6} className="px-2 py-1.5">
@@ -602,7 +763,11 @@ export default function App() {
                 </table>
                 {days.length === 0 && <div className="text-center text-sm text-slate-400 py-10">No days yet. Add your first day below.</div>}
               </div>
-              <div className="mt-4"><Btn onClick={addDay} color="bg-indigo-500 hover:bg-indigo-600"><Plus size={16} /> Add day</Btn></div>
+              <div className="mt-4">
+                <Btn onClick={addDay} color="bg-indigo-500 hover:bg-indigo-600">
+                  <Plus size={16} /> Add day
+                </Btn>
+              </div>
             </div>
           )}
 
@@ -629,26 +794,34 @@ export default function App() {
                       )}
                     </div>
                   ))}
-                  <button onClick={() => add("currencies", { code: "", symbol: "", rate: "" })}
-                    className="inline-flex items-center gap-1 text-sm text-amber-600 hover:bg-amber-50 px-3 rounded-lg border border-dashed border-amber-300"><Plus size={14} /> Currency</button>
+                  <button onClick={() => add("currencies", { code: "", symbol: "", rate: "" })} className="inline-flex items-center gap-1 text-sm text-amber-600 hover:bg-amber-50 px-3 rounded-lg border border-dashed border-amber-300">
+                    <Plus size={14} /> Currency
+                  </button>
                 </div>
-                {missingRate && <div className="text-xs text-rose-500 mt-2">Some currencies have no exchange rate yet, so combined totals won't include them correctly.</div>}
+                {missingRate && <div className="text-xs text-rose-500 mt-2">Some currencies have no exchange rate yet, so combined totals won&apos;t include them correctly.</div>}
               </div>
 
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 <Stat label={`Total spent (in ${home.code})`} value={fmt(totalHome)} accent="bg-amber-400" sub={perCur.map((x) => fmt(x.total, x.code)).join(" + ") || "No expenses yet"} />
                 <Stat label="Per person (avg)" value={fmt(totalHome / people.length)} accent="bg-orange-400" />
                 <Stat label="Unsettled expenses" value={unsettled.length} accent="bg-rose-400" sub={`${expenses.length - unsettled.length} settled / empty`} />
-                <Stat label="Savings vs cost" value={fmt(totalSaved - totalHome)} accent={totalSaved >= totalHome ? "bg-emerald-500" : "bg-rose-400"}
-                  sub={totalSaved >= totalHome ? "Savings cover the trip" : "Short of trip cost"} />
+                <Stat label="Savings vs cost" value={fmt(totalSaved - totalHome)} accent={totalSaved >= totalHome ? "bg-emerald-500" : "bg-rose-400"} sub={totalSaved >= totalHome ? "Savings cover the trip" : "Short of trip cost"} />
               </div>
 
               {/* Expense table */}
               <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
                 <table className="w-full min-w-max">
-                  <thead className="bg-slate-50 border-b border-slate-200"><tr>
-                    <TH>Category</TH><TH>Item</TH><TH>Amount</TH><TH>Paid by</TH><TH>Split between</TH><TH className="text-center">Settled</TH><TH></TH>
-                  </tr></thead>
+                  <thead className="bg-slate-50 border-b border-slate-200">
+                    <tr>
+                      <TH>Category</TH>
+                      <TH>Item</TH>
+                      <TH>Amount</TH>
+                      <TH>Paid by</TH>
+                      <TH>Split between</TH>
+                      <TH className="text-center">Settled</TH>
+                      <TH></TH>
+                    </tr>
+                  </thead>
                   <tbody className="divide-y divide-slate-100">
                     {expenses.map((e, i) => {
                       const cat = normCat(e.cat);
@@ -657,53 +830,69 @@ export default function App() {
                         <tr key={e.id} className={`hover:bg-slate-50/60 ${e.settled ? "opacity-50" : ""}`}>
                           <td className="px-3 py-1.5">
                             <Select value={cat} onChange={(v) => upd("expenses", i, "cat", v)} className={`font-medium ${CAT_TINT[cat]}`}>
-                              {CATS.map((c) => <option key={c}>{c}</option>)}
+                              {CATS.map((c) => (
+                                <option key={c}>{c}</option>
+                              ))}
                             </Select>
                           </td>
-                          <td className="px-1"><Cell value={e.item} onChange={(v) => upd("expenses", i, "item", v)} className="font-medium min-w-44" placeholder="e.g. Grab to KL Sentral" /></td>
+                          <td className="px-1">
+                            <Cell value={e.item} onChange={(v) => upd("expenses", i, "item", v)} className="font-medium min-w-44" placeholder="e.g. Grab to KL Sentral" />
+                          </td>
                           <td className="px-1">
                             <div className="flex items-center bg-slate-50 rounded-md">
                               <Select value={e.cur} onChange={(v) => upd("expenses", i, "cur", v)} className="bg-slate-100 font-semibold">
-                                {currencies.map((c) => <option key={c.code} value={c.code}>{c.code || "?"}</option>)}
+                                {currencies.map((c) => (
+                                  <option key={c.code} value={c.code}>
+                                    {c.code || "?"}
+                                  </option>
+                                ))}
                               </Select>
                               <Cell type="number" value={e.amount} onChange={(v) => upd("expenses", i, "amount", v)} className="w-28" placeholder="0" />
                             </div>
                           </td>
                           <td className="px-2">
                             <Select value={e.paidBy} onChange={(v) => upd("expenses", i, "paidBy", Number(v))} className="bg-slate-100">
-                              {people.map((p, j) => <option key={j} value={j}>{p.name}</option>)}
+                              {people.map((p, j) => (
+                                <option key={p.id} value={j}>
+                                  {p.name || `Person ${j + 1}`}
+                                </option>
+                              ))}
                             </Select>
                           </td>
                           <td className="px-2">
                             <div className="flex items-center gap-1">
                               {people.map((p, j) => (
-                                <button key={j} title={p.name} onClick={() => toggleSplit(i, j)}>
-                                  <Avatar name={p.name} i={j} size="w-6 h-6 text-xs" className={e.split.includes(j) ? "" : "opacity-20 grayscale"} />
+                                <button key={p.id} title={p.name} onClick={() => toggleSplit(i, j)}>
+                                  <Avatar person={p} i={j} size="w-6 h-6 text-xs" className={e.split.includes(j) ? "" : "opacity-20 grayscale"} />
                                 </button>
                               ))}
                               <button onClick={() => setSplitAll(i, n !== people.length)} className="text-xs text-slate-400 hover:text-slate-600 ml-1 w-10">
                                 {n === people.length ? "none" : "all"}
                               </button>
-                              <span className="text-xs text-slate-500 whitespace-nowrap">
-                                {n ? `${fmt(num(e.amount) / n, e.cur)} each` : "no one"}
-                              </span>
+                              <span className="text-xs text-slate-500 whitespace-nowrap">{n ? `${fmt(num(e.amount) / n, e.cur)} each` : "no one"}</span>
                             </div>
                           </td>
                           <td className="px-3 text-center">
-                            <button onClick={() => upd("expenses", i, "settled", !e.settled)}
-                              className={`w-5 h-5 rounded border-2 inline-flex items-center justify-center transition ${e.settled ? "bg-emerald-500 border-emerald-500 text-white" : "border-slate-300 hover:border-emerald-400"}`}>
+                            <button
+                              onClick={() => upd("expenses", i, "settled", !e.settled)}
+                              className={`w-5 h-5 rounded border-2 inline-flex items-center justify-center transition ${e.settled ? "bg-emerald-500 border-emerald-500 text-white" : "border-slate-300 hover:border-emerald-400"}`}
+                            >
                               {e.settled && <Check size={13} strokeWidth={3} />}
                             </button>
                           </td>
-                          <td className="px-2"><Del onClick={() => del("expenses", i)} /></td>
+                          <td className="px-2">
+                            <Del onClick={() => del("expenses", i)} />
+                          </td>
                         </tr>
                       );
                     })}
                   </tbody>
                 </table>
               </div>
-              <Btn color="bg-amber-500 hover:bg-amber-600"
-                onClick={() => add("expenses", { id: uid(), cat: "Food", item: "", amount: "", cur: currencies[currencies.length > 1 ? 1 : 0].code, paidBy: 0, split: people.map((_, j) => j), settled: false })}>
+              <Btn
+                color="bg-amber-500 hover:bg-amber-600"
+                onClick={() => add("expenses", { id: uid(), cat: "Food", item: "", amount: "", cur: currencies[currencies.length > 1 ? 1 : 0].code, paidBy: 0, split: people.map((_, j) => j), settled: false })}
+              >
                 <Plus size={16} /> Add expense
               </Btn>
               <p className="text-xs text-slate-400 -mt-2">Tap the circles to choose who shares each expense, e.g. 2 Grab cars = 2 rows, each with its own group.</p>
@@ -711,10 +900,16 @@ export default function App() {
               {/* Settle up */}
               <div className="bg-white rounded-xl border border-slate-200 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-                  <div className="text-sm font-semibold text-slate-700">Settle up <span className="font-normal text-slate-400">· who pays whom</span></div>
+                  <div className="text-sm font-semibold text-slate-700">
+                    Settle up <span className="font-normal text-slate-400">· who pays whom</span>
+                  </div>
                   <div className="flex bg-slate-100 rounded-lg p-0.5 text-xs font-medium">
-                    <button onClick={() => setSettleMode("separate")} className={`px-3 py-1.5 rounded-md ${settleMode === "separate" ? "bg-white shadow-sm text-slate-800" : "text-slate-500"}`}>Per currency</button>
-                    <button onClick={() => setSettleMode("combined")} className={`px-3 py-1.5 rounded-md ${settleMode === "combined" ? "bg-white shadow-sm text-slate-800" : "text-slate-500"}`}>Combined in {home.code}</button>
+                    <button onClick={() => setSettleMode("separate")} className={`px-3 py-1.5 rounded-md ${settleMode === "separate" ? "bg-white shadow-sm text-slate-800" : "text-slate-500"}`}>
+                      Per currency
+                    </button>
+                    <button onClick={() => setSettleMode("combined")} className={`px-3 py-1.5 rounded-md ${settleMode === "combined" ? "bg-white shadow-sm text-slate-800" : "text-slate-500"}`}>
+                      Combined in {home.code}
+                    </button>
                   </div>
                 </div>
 
@@ -737,21 +932,24 @@ export default function App() {
                             {tr.length === 0 && <div className="text-sm text-slate-400 px-3 py-3">Nothing to pay back.</div>}
                             {tr.map((t, k) => (
                               <div key={k} className="flex items-center gap-2 px-3 py-2.5 text-sm">
-                                <Avatar name={people[t.from].name} i={t.from} size="w-6 h-6 text-xs" />
+                                <Avatar person={people[t.from]} i={t.from} size="w-6 h-6 text-xs" />
                                 <span className="font-medium">{people[t.from].name}</span>
                                 <ArrowRight size={14} className="text-slate-400" />
-                                <Avatar name={people[t.to].name} i={t.to} size="w-6 h-6 text-xs" />
+                                <Avatar person={people[t.to]} i={t.to} size="w-6 h-6 text-xs" />
                                 <span className="font-medium">{people[t.to].name}</span>
                                 <span className="ml-auto font-semibold text-rose-600">{fmt(t.amt, g.fmtCode)}</span>
                               </div>
                             ))}
                           </div>
                           <div className="flex flex-wrap gap-1.5 px-3 py-2 bg-slate-50 border-t border-slate-100">
-                            {bal.map((v, j) => Math.abs(v) < (decOf(g.fmtCode) === 0 ? 0.5 : 0.005) ? null : (
-                              <span key={j} className={`text-xs px-2 py-0.5 rounded-full ${v > 0 ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-600"}`}>
-                                {people[j].name} {v > 0 ? "+" : "−"}{fmt(Math.abs(v), g.fmtCode)}
-                              </span>
-                            ))}
+                            {bal.map((v, j) =>
+                              Math.abs(v) < (decOf(g.fmtCode) === 0 ? 0.5 : 0.005) ? null : (
+                                <span key={j} className={`text-xs px-2 py-0.5 rounded-full ${v > 0 ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-600"}`}>
+                                  {people[j].name} {v > 0 ? "+" : "−"}
+                                  {fmt(Math.abs(v), g.fmtCode)}
+                                </span>
+                              ),
+                            )}
                           </div>
                         </div>
                       );
@@ -767,43 +965,119 @@ export default function App() {
             <div className="space-y-4">
               <div className="bg-white rounded-xl border border-slate-200 p-4">
                 <div className="flex justify-between text-sm mb-2">
-                  <span className="font-medium text-slate-600">Packed {packed} of {packing.length}</span>
+                  <span className="font-medium text-slate-600">
+                    Packed {packed} of {packing.length}
+                  </span>
                   <span className="font-semibold text-sky-600">{packing.length ? Math.round((packed / packing.length) * 100) : 0}%</span>
                 </div>
                 <Bar pct={packing.length ? (packed / packing.length) * 100 : 0} color="bg-sky-500" />
               </div>
               <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
                 <table className="w-full min-w-max">
-                  <thead className="bg-slate-50 border-b border-slate-200"><tr>
-                    <TH className="w-12"></TH><TH>Item</TH><TH>Who brings it</TH><TH></TH>
-                  </tr></thead>
+                  <thead className="bg-slate-50 border-b border-slate-200">
+                    <tr>
+                      <TH className="w-12"></TH>
+                      <TH>Item</TH>
+                      <TH>Who brings it</TH>
+                      <TH></TH>
+                    </tr>
+                  </thead>
                   <tbody className="divide-y divide-slate-100">
                     {packing.map((r, i) => (
                       <tr key={i} className="hover:bg-slate-50/60">
                         <td className="px-3 py-1.5">
-                          <button onClick={() => upd("packing", i, "done", !r.done)}
-                            className={`w-5 h-5 rounded border-2 flex items-center justify-center transition ${r.done ? "bg-sky-500 border-sky-500 text-white" : "border-slate-300 hover:border-sky-400"}`}>
+                          <button
+                            onClick={() => upd("packing", i, "done", !r.done)}
+                            className={`w-5 h-5 rounded border-2 flex items-center justify-center transition ${r.done ? "bg-sky-500 border-sky-500 text-white" : "border-slate-300 hover:border-sky-400"}`}
+                          >
                             {r.done && <Check size={13} strokeWidth={3} />}
                           </button>
                         </td>
-                        <td className="px-1"><Cell value={r.item} onChange={(v) => upd("packing", i, "item", v)} className={`min-w-56 ${r.done ? "line-through text-slate-400" : "font-medium"}`} placeholder="Item" /></td>
+                        <td className="px-1">
+                          <Cell value={r.item} onChange={(v) => upd("packing", i, "item", v)} className={`min-w-56 ${r.done ? "line-through text-slate-400" : "font-medium"}`} placeholder="Item" />
+                        </td>
                         <td className="px-3">
                           <Select value={r.who} onChange={(v) => upd("packing", i, "who", v)} className="bg-slate-100">
                             <option value="Everyone">Everyone</option>
-                            {people.map((p, j) => <option key={j} value={p.name}>{p.name}</option>)}
+                            {people.map((p) => (
+                              <option key={p.id} value={p.name}>
+                                {p.name}
+                              </option>
+                            ))}
                           </Select>
                         </td>
-                        <td className="px-2"><Del onClick={() => del("packing", i)} /></td>
+                        <td className="px-2">
+                          <Del onClick={() => del("packing", i)} />
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-              <Btn color="bg-sky-500 hover:bg-sky-600" onClick={() => add("packing", { item: "", who: "Everyone", done: false })}><Plus size={16} /> Add item</Btn>
+              <Btn color="bg-sky-500 hover:bg-sky-600" onClick={() => add("packing", { item: "", who: "Everyone", done: false })}>
+                <Plus size={16} /> Add item
+              </Btn>
             </div>
           )}
         </div>
       </div>
+
+      {/* ═════════ TRAVELERS MODAL ═════════ */}
+      {showPeople && (
+        <div className="fixed inset-0 z-50 bg-slate-900/40 flex items-center justify-center p-4" onClick={() => setShowPeople(false)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200">
+              <div>
+                <div className="font-semibold text-slate-800">Travelers</div>
+                <div className="text-xs text-slate-400">
+                  {people.length} {people.length === 1 ? "person" : "people"} · tap a photo to change it
+                </div>
+              </div>
+              <button onClick={() => setShowPeople(false)} className="p-1.5 rounded-md text-slate-400 hover:bg-slate-100">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto divide-y divide-slate-100 px-2">
+              {people.map((p, i) => (
+                <div key={p.id} className="flex items-center gap-3 px-3 py-2.5">
+                  <label className="relative cursor-pointer group shrink-0" title="Upload photo">
+                    <Avatar person={p} i={i} size="w-11 h-11 text-base" />
+                    <span className="absolute inset-0 rounded-full bg-black/40 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition">
+                      <Camera size={16} />
+                    </span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        setPhoto(i, e.target.files && e.target.files[0]);
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                  <Cell value={p.name} onChange={(v) => renamePerson(i, v)} className="font-medium" placeholder="Name" />
+                  {p.photo && (
+                    <button onClick={() => upd("people", i, "photo", "")} className="text-xs text-slate-400 hover:text-slate-600 whitespace-nowrap">
+                      Remove photo
+                    </button>
+                  )}
+                  <Del onClick={() => removePerson(i)} title="Remove traveler" />
+                </div>
+              ))}
+            </div>
+
+            <div className="flex items-center justify-between px-5 py-4 border-t border-slate-200">
+              <Btn onClick={addPerson} color="bg-indigo-500 hover:bg-indigo-600">
+                <UserPlus size={16} /> Add traveler
+              </Btn>
+              <button onClick={() => setShowPeople(false)} className="text-sm font-medium text-slate-500 hover:text-slate-700 px-3 py-2">
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
