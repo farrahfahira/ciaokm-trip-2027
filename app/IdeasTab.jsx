@@ -1,12 +1,15 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Plus, Trash2, Heart, CalendarPlus, Check, Image as ImageIcon } from "lucide-react";
+import { Plus, Trash2, Heart, CalendarPlus, Check, ImagePlus, X, Image as ImageIcon } from "lucide-react";
 import IdeaPage from "./IdeaPage";
-import { IDEA_CATS, IDEA_LABEL, IDEA_TINT, uid, URL_RE, dayLabel, coverOf, firstLinkOf, titleOf, domainOf } from "./ideaUtils";
+import { Sheet } from "./MobileViews";
+import { IDEA_CATS, IDEA_LABEL, IDEA_TINT, uid, URL_RE, dayLabel, coverOf, firstLinkOf, titleOf, domainOf, uploadPhoto } from "./ideaUtils";
 
 const ME_KEY = "trip-planner-me";
 const isEmptyRow = (r) => !r.time && !r.place && !r.link && !r.activity && !r.price && !r.notes;
+const field = "w-full text-base bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 focus:bg-white focus:outline-none focus:ring-2 focus:ring-violet-300 placeholder:text-slate-400";
+const lbl = "block text-sm font-medium text-slate-600 mb-1.5";
 
 const Chip = ({ active, onClick, children }) => (
   <button
@@ -22,29 +25,26 @@ export default function IdeasTab({ data, setData }) {
   const ideas = data.ideas || [];
   const cities = data.ideaCities || [];
 
-  const [draft, setDraft] = useState("");
-  const [cityFilter, setCityFilter] = useState("all"); // "all" | "" (belum ada kota) | id kota
+  const [cityFilter, setCityFilter] = useState("all"); // "all" | id kota
   const [catFilter, setCatFilter] = useState("all");
   const [sort, setSort] = useState("interest");
-  const [me, setMeState] = useState(null);
-  const [needMe, setNeedMe] = useState(false);
+  const [me, setMe] = useState(null);
   const [newCity, setNewCity] = useState(null);
   const [openId, setOpenId] = useState(null);
+  const [draft, setDraft] = useState(null);
+  const [draftCity, setDraftCity] = useState(null);
+  const [uploading, setUploading] = useState(0);
+  const [error, setError] = useState("");
   const openedHere = useRef(false);
   const boardScroll = useRef(0);
   const topRef = useRef(null);
+  const fileRef = useRef(null);
 
-  // "Aku" disimpan di HP ini aja
+  // Profil yang dipilih di perangkat ini
   useEffect(() => {
     const v = localStorage.getItem(ME_KEY);
-    if (v !== null && v !== "" && Number(v) < people.length) setMeState(Number(v));
+    if (v !== null && v !== "" && Number(v) < people.length) setMe(Number(v));
   }, [people.length]);
-  const setMe = (v) => {
-    setMeState(v);
-    setNeedMe(false);
-    if (v === null) localStorage.removeItem(ME_KEY);
-    else localStorage.setItem(ME_KEY, String(v));
-  };
 
   // Tiap ide punya link sendiri: #idea-<id>
   useEffect(() => {
@@ -78,44 +78,15 @@ export default function IdeasTab({ data, setData }) {
     }
   }, [openId]);
 
-  const activeCity = cityFilter === "all" || cityFilter === "" || cities.some((c) => c.id === cityFilter) ? cityFilter : "all";
+  const activeCity = cityFilter === "all" || cities.some((c) => c.id === cityFilter) ? cityFilter : "all";
   const selectedCity = cities.find((c) => c.id === activeCity);
   const cityOf = (x) => (cities.some((c) => c.id === x.city) ? x.city : "");
 
   const setIdeas = (fn) => setData((d) => ({ ...d, ideas: fn(d.ideas || []) }));
   const setIdeaById = (id) => (fn) => setIdeas((xs) => xs.map((x) => (x.id === id ? fn(x) : x)));
 
-  const addIdea = () => {
-    const raw = draft.trim();
-    if (!raw) return;
-    const m = raw.match(URL_RE);
-    const link = m ? m[0] : "";
-    const text = m ? raw.replace(m[0], "").trim() : raw;
-    setIdeas((xs) => [
-      {
-        id: uid(),
-        text,
-        links: link ? [{ id: uid(), url: link }] : [],
-        photos: [],
-        cover: "",
-        note: "",
-        city: activeCity === "all" ? "" : activeCity,
-        cat: catFilter === "all" ? "" : catFilter,
-        by: me,
-        likes: me === null ? [] : [me],
-        planned: false,
-        created: Date.now(),
-      },
-      ...xs,
-    ]);
-    setDraft("");
-  };
-
   const toggleLike = (idea) => {
-    if (me === null) {
-      setNeedMe(true);
-      return;
-    }
+    if (me === null) return;
     setIdeas((xs) =>
       xs.map((x) => {
         if (x.id !== idea.id) return x;
@@ -125,6 +96,7 @@ export default function IdeasTab({ data, setData }) {
     );
   };
 
+  // ── kota ──
   const addCity = () => {
     const name = (newCity || "").trim();
     if (!name) {
@@ -139,7 +111,7 @@ export default function IdeasTab({ data, setData }) {
   const renameCity = (id, name) => setData((d) => ({ ...d, ideaCities: (d.ideaCities || []).map((c) => (c.id === id ? { ...c, name } : c)) }));
   const delCity = (id) => {
     const n = ideas.filter((x) => x.city === id).length;
-    if (n && !confirm(`Hapus kota ini? ${n} ide di dalamnya pindah ke "Belum ada kota".`)) return;
+    if (!confirm(`Hapus kota ini?${n ? `\n\n${n} ide di dalamnya tetap ada, hanya tidak punya kota.` : ""}`)) return;
     setData((d) => ({
       ...d,
       ideaCities: (d.ideaCities || []).filter((c) => c.id !== id),
@@ -148,6 +120,7 @@ export default function IdeasTab({ data, setData }) {
     setCityFilter("all");
   };
 
+  // ── pindah ke itinerary ──
   const moveToDay = (idea, dayId) => {
     const link = firstLinkOf(idea);
     const row = { id: uid(), time: "", place: idea.text || domainOf(link) || "Ide", link, activity: idea.cat ? IDEA_LABEL[idea.cat] : "", price: "", notes: idea.note || "" };
@@ -165,6 +138,72 @@ export default function IdeasTab({ data, setData }) {
     }));
   };
 
+  // ── form tambah ide ──
+  const openNew = () => {
+    setError("");
+    setDraftCity(null);
+    setDraft({ text: "", link: "", city: activeCity === "all" ? "" : activeCity, cat: catFilter === "all" ? "" : catFilter, photos: [], note: "" });
+  };
+  const setD = (f, v) => setDraft((d) => ({ ...d, [f]: v }));
+  const addDraftPhotos = async (fileList) => {
+    const files = [...fileList];
+    if (!files.length) return;
+    setError("");
+    setUploading((n) => n + files.length);
+    for (const file of files) {
+      try {
+        const photo = await uploadPhoto(file);
+        setDraft((d) => (d ? { ...d, photos: [...d.photos, photo] } : d));
+      } catch (e) {
+        setError(e.message);
+      }
+      setUploading((n) => n - 1);
+    }
+  };
+  const addDraftCity = () => {
+    const name = (draftCity || "").trim();
+    if (!name) {
+      setDraftCity(null);
+      return;
+    }
+    const id = uid();
+    setData((d) => ({ ...d, ideaCities: [...(d.ideaCities || []), { id, name }] }));
+    setDraft((d) => ({ ...d, city: id }));
+    setDraftCity(null);
+  };
+  const saveIdea = () => {
+    let text = draft.text.trim();
+    let link = draft.link.trim();
+    // Kalau link ditempel di kolom nama, pindahkan ke kolom link
+    const m = !link && text.match(URL_RE);
+    if (m) {
+      link = m[0];
+      text = text.replace(m[0], "").trim();
+    }
+    if (link && !/^https?:\/\//i.test(link)) link = `https://${link}`;
+    if (!text && !link) return setError("Isi nama atau link terlebih dahulu.");
+    if (uploading) return setError("Tunggu sampai foto selesai diunggah.");
+    setIdeas((xs) => [
+      {
+        id: uid(),
+        text,
+        links: link ? [{ id: uid(), url: link }] : [],
+        photos: draft.photos,
+        cover: "",
+        note: draft.note.trim(),
+        city: draft.city,
+        cat: draft.cat,
+        by: me,
+        likes: me === null ? [] : [me],
+        planned: false,
+        created: Date.now(),
+      },
+      ...xs,
+    ]);
+    setDraft(null);
+  };
+
+  // ── hitungan & urutan ──
   const likesOf = (x) => (x.likes || []).filter((p) => p < people.length);
   const inCity = (id) => ideas.filter((x) => cityOf(x) === id);
   const cityHearts = (id) => inCity(id).reduce((s, x) => s + likesOf(x).length, 0);
@@ -186,8 +225,8 @@ export default function IdeasTab({ data, setData }) {
             cities={cities}
             days={days}
             me={me}
-            needMe={needMe}
-            setMe={setMe}
+            needMe={false}
+            setMe={() => {}}
             setIdea={setIdeaById(idea.id)}
             onToggleLike={() => toggleLike(idea)}
             onMoveToDay={(dayId) => moveToDay(idea, dayId)}
@@ -200,7 +239,7 @@ export default function IdeasTab({ data, setData }) {
           />
         ) : (
           <div className="bg-white rounded-xl border border-slate-200 p-10 text-center space-y-3">
-            <p className="text-sm text-slate-500">Ide ini udah dihapus.</p>
+            <p className="text-sm text-slate-500">Ide ini sudah dihapus.</p>
             <button onClick={closeIdea} className="text-sm font-medium text-violet-600 hover:bg-violet-50 px-3 py-1.5 rounded-lg">
               Kembali
             </button>
@@ -213,51 +252,17 @@ export default function IdeasTab({ data, setData }) {
   // ── papan ide ──
   return (
     <div className="space-y-4">
-      <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3">
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            addIdea();
-          }}
-          className="flex gap-2"
-        >
-          <input
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder="Tempel link atau ketik ide"
-            className="flex-1 min-w-0 text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300 placeholder:text-slate-400"
-          />
-          <button type="submit" className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-medium text-white bg-violet-500 hover:bg-violet-600 transition">
-            <Plus size={16} /> Tambah
-          </button>
-        </form>
-        <div className="flex flex-wrap items-center gap-2 text-sm">
-          <span className="text-slate-500">Aku</span>
-          <select
-            value={me ?? ""}
-            onChange={(e) => setMe(e.target.value === "" ? null : Number(e.target.value))}
-            className={`text-sm rounded-md px-2 py-1.5 bg-slate-100 cursor-pointer focus:outline-none focus:ring-2 focus:ring-violet-300 ${needMe ? "ring-2 ring-rose-300" : ""}`}
-          >
-            <option value="">Pilih nama</option>
-            {people.map((p, i) =>
-              p.removed ? null : (
-                <option key={i} value={i}>
-                  {p.name}
-                </option>
-              ),
-            )}
-          </select>
-          {needMe && <span className="text-xs text-rose-500">Pilih nama dulu</span>}
-        </div>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm text-slate-500">{ideas.length} ide</span>
+        <button onClick={openNew} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium text-white bg-violet-500 hover:bg-violet-600 active:bg-violet-600">
+          <Plus size={16} /> Tambah ide
+        </button>
       </div>
 
       {/* Kota */}
       <div className="flex items-center gap-2 overflow-x-auto -mx-4 px-4 md:mx-0 md:px-0 md:flex-wrap scrollbar-none">
         <Chip active={activeCity === "all"} onClick={() => setCityFilter("all")}>
           Semua <span className="opacity-70">{ideas.length}</span>
-        </Chip>
-        <Chip active={activeCity === ""} onClick={() => setCityFilter("")}>
-          Belum ada kota <span className="opacity-70">{inCity("").length}</span>
         </Chip>
         {cities.map((c) => (
           <Chip key={c.id} active={activeCity === c.id} onClick={() => setCityFilter(c.id)}>
@@ -334,7 +339,7 @@ export default function IdeasTab({ data, setData }) {
 
       {/* Kartu */}
       {visible.length === 0 ? (
-        <div className="bg-white rounded-xl border border-dashed border-slate-300 text-center text-sm text-slate-400 py-12">{ideas.length === 0 ? "Belum ada ide." : "Nggak ada yang cocok."}</div>
+        <div className="bg-white rounded-xl border border-dashed border-slate-300 text-center text-sm text-slate-400 py-12">{ideas.length === 0 ? "Belum ada ide." : "Tidak ada yang cocok."}</div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 items-start">
           {visible.map((x) => {
@@ -404,6 +409,135 @@ export default function IdeasTab({ data, setData }) {
             );
           })}
         </div>
+      )}
+
+      {/* Form tambah ide */}
+      {draft && (
+        <Sheet
+          title="Tambah ide"
+          onClose={() => setDraft(null)}
+          footer={
+            <div className="flex items-center gap-2">
+              <button onClick={() => setDraft(null)} className="ml-auto text-sm text-slate-500 px-4 py-2.5 rounded-lg hover:bg-slate-100 active:bg-slate-100">
+                Batal
+              </button>
+              <button onClick={saveIdea} className="text-sm font-medium text-white bg-violet-500 hover:bg-violet-600 active:bg-violet-600 px-6 py-2.5 rounded-lg">
+                Simpan
+              </button>
+            </div>
+          }
+        >
+          <div className="space-y-5">
+            <div>
+              <label className={lbl}>Nama</label>
+              <input autoFocus value={draft.text} onChange={(e) => setD("text", e.target.value)} placeholder="Nama tempat atau ide" className={field} />
+            </div>
+
+            <div>
+              <label className={lbl}>
+                Link <span className="font-normal text-slate-400">(opsional)</span>
+              </label>
+              <input type="url" inputMode="url" value={draft.link} onChange={(e) => setD("link", e.target.value)} placeholder="Tempel link TikTok, Instagram, atau Google Maps" className={field} />
+            </div>
+
+            <div>
+              <label className={lbl}>Kota</label>
+              <div className="flex flex-wrap gap-1.5">
+                {cities.map((c) => (
+                  <button
+                    key={c.id}
+                    onClick={() => setD("city", draft.city === c.id ? "" : c.id)}
+                    className={`text-sm px-3 py-1.5 rounded-lg transition ${draft.city === c.id ? "bg-violet-50 text-violet-700 ring-1 ring-violet-300 font-medium" : "bg-slate-50 text-slate-500"}`}
+                  >
+                    {c.name || "Tanpa nama"}
+                  </button>
+                ))}
+                {draftCity === null ? (
+                  <button onClick={() => setDraftCity("")} className="inline-flex items-center gap-1 text-sm px-3 py-1.5 rounded-lg border border-dashed border-violet-300 text-violet-600">
+                    <Plus size={14} /> Kota
+                  </button>
+                ) : (
+                  <div className="flex items-center gap-1.5 w-full">
+                    <input
+                      autoFocus
+                      value={draftCity}
+                      onChange={(e) => setDraftCity(e.target.value)}
+                      placeholder="Nama kota"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          addDraftCity();
+                        }
+                        if (e.key === "Escape") setDraftCity(null);
+                      }}
+                      className={field}
+                    />
+                    <button onClick={addDraftCity} className="shrink-0 text-sm font-medium text-violet-700 bg-violet-50 px-3 py-2.5 rounded-lg">
+                      Tambah
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div>
+              <label className={lbl}>Kategori</label>
+              <div className="flex flex-wrap gap-1.5">
+                {IDEA_CATS.map((c) => (
+                  <button
+                    key={c}
+                    onClick={() => setD("cat", draft.cat === c ? "" : c)}
+                    className={`text-sm px-3 py-1.5 rounded-lg transition ${draft.cat === c ? `${IDEA_TINT[c]} ring-1 ring-current font-medium` : "bg-slate-50 text-slate-500"}`}
+                  >
+                    {IDEA_LABEL[c]}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className={lbl}>
+                Foto <span className="font-normal text-slate-400">(opsional)</span>
+              </label>
+              <div className="grid grid-cols-4 gap-2">
+                {draft.photos.map((ph) => (
+                  <div key={ph.id} className="relative aspect-square rounded-lg overflow-hidden bg-slate-100">
+                    <img src={ph.url} alt="" className="w-full h-full object-cover" />
+                    <button onClick={() => setDraft((d) => ({ ...d, photos: d.photos.filter((x) => x.id !== ph.id) }))} aria-label="Hapus foto" className="absolute top-1 right-1 p-1 rounded-full bg-black/50 text-white">
+                      <X size={12} />
+                    </button>
+                  </div>
+                ))}
+                {Array.from({ length: uploading }).map((_, i) => (
+                  <div key={`up-${i}`} className="aspect-square rounded-lg bg-slate-100 animate-pulse" />
+                ))}
+                <button onClick={() => fileRef.current?.click()} className="aspect-square rounded-lg border-2 border-dashed border-slate-200 hover:border-violet-300 active:bg-violet-50 flex items-center justify-center text-slate-400">
+                  <ImagePlus size={20} />
+                </button>
+              </div>
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/*"
+                multiple
+                hidden
+                onChange={(e) => {
+                  addDraftPhotos(e.target.files);
+                  e.target.value = "";
+                }}
+              />
+            </div>
+
+            <div>
+              <label className={lbl}>
+                Catatan <span className="font-normal text-slate-400">(opsional)</span>
+              </label>
+              <textarea rows={3} value={draft.note} onChange={(e) => setD("note", e.target.value)} placeholder="Jam buka, harga, cara ke sana" className={`${field} resize-none`} />
+            </div>
+
+            {error && <p className="text-sm text-rose-500">{error}</p>}
+          </div>
+        </Sheet>
       )}
     </div>
   );
