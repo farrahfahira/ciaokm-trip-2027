@@ -17,6 +17,7 @@ export function useSharedTrip(makeInitial, normalize = (d) => d) {
   const versionRef = useRef(0);
   const savingRef = useRef(false);
   const timerRef = useRef(null);
+  const reasonRef = useRef(null); // "reset" | "restore" → server backs up before saving
 
   // Merge server data into local state. Returns true if we still have unsaved changes.
   const adoptRemote = useCallback(
@@ -49,12 +50,13 @@ export function useSharedTrip(makeInitial, normalize = (d) => d) {
       const res = await fetch(API, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ data: local, baseVersion: versionRef.current }),
+        body: JSON.stringify({ data: local, baseVersion: versionRef.current, ...(reasonRef.current ? { reason: reasonRef.current } : {}) }),
       });
       const body = await res.json();
       if (res.ok) {
         baseRef.current = local;
         versionRef.current = body.version;
+        reasonRef.current = null;
       } else if (res.status === 409) {
         adoptRemote(body.data, body.version); // merge friends' changes, then save again below
       } else {
@@ -98,9 +100,10 @@ export function useSharedTrip(makeInitial, normalize = (d) => d) {
     }
   }, [adoptRemote, scheduleSave]);
 
-  // Works like setState: update(d => ({ ...d, ... })) or update(newData)
+  // Works like setState: update(d => ({ ...d, ... })) or update(newData, { reason: "reset" })
   const update = useCallback(
-    (next) => {
+    (next, opts) => {
+      if (opts?.reason) reasonRef.current = opts.reason;
       setTrip((prev) => {
         const value = typeof next === "function" ? next(prev) : next;
         tripRef.current = value;

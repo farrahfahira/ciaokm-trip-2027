@@ -1,38 +1,28 @@
-import { Redis } from "@upstash/redis";
 import { NextResponse } from "next/server";
+import { redis, KEY, VERSION_KEY, SNAP_PREFIX, SNAP_INDEX, KEEP_DAYS, parse } from "./store";
 
 export const dynamic = "force-dynamic";
 
-const redis = new Redis({
-  url: process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL,
-  token: process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN,
-});
+const REASONS = new Set(["reset", "restore"]);
+const TIME_ZONE = "Asia/Jakarta"; // decides when a "day" starts for daily backups
 
-const KEY = "trip:group-trip-shared-v1";
-const VERSION_KEY = `${KEY}:version`;
-
-// Runs atomically inside Redis: only write if nobody saved since baseVersion.
+// Atomically: check version → back up the old data → save the new data.
+// The backup uses NX, so a daily key is only written by the first save of that day.
 const SAVE_SCRIPT = `
 local current = tonumber(redis.call("GET", KEYS[2]) or "0")
 if current ~= tonumber(ARGV[2]) then
   return {0, current}
 end
+local old = redis.call("GET", KEYS[1])
+if old then
+  if redis.call("SET", KEYS[3], old, "EX", ARGV[4], "NX") then
+    redis.call("ZADD", KEYS[4], ARGV[3], KEYS[3])
+  end
+end
+redis.call("ZREMRANGEBYSCORE", KEYS[4], "-inf", ARGV[5])
 redis.call("SET", KEYS[1], ARGV[1])
 return {1, redis.call("INCR", KEYS[2])}
 `;
-
-// Older saves may come back as a JSON string or an already-parsed object.
-const parse = (v) => {
-  if (v == null) return null;
-  if (typeof v === "string") {
-    try {
-      return parse(JSON.parse(v));
-    } catch {
-      return null;
-    }
-  }
-  return v;
-};
 
 async function readTrip() {
   const [data, version] = await redis.mget(KEY, VERSION_KEY);
@@ -44,12 +34,17 @@ export async function GET() {
 }
 
 export async function PUT(req) {
-  const { data, baseVersion } = await req.json();
+  const { data, baseVersion, reason } = await req.json();
   if (!data || typeof data !== "object") {
     return NextResponse.json({ error: "Missing data" }, { status: 400 });
   }
 
-  const [ok, version] = await redis.eval(SAVE_SCRIPT, [KEY, VERSION_KEY], [JSON.stringify(data), String(baseVersion ?? 0)]);
+  const now = Date.now();
+  const today = new Date(now).toLocaleDateString("en-CA", { timeZone: TIME_ZONE }); // YYYY-MM-DD
+  const snapKey = REASONS.has(reason) ? `${SNAP_PREFIX}${reason}:${now}` : `${SNAP_PREFIX}daily:${today}`;
+  const keepSeconds = KEEP_DAYS * 86400;
+
+  const [ok, version] = await redis.eval(SAVE_SCRIPT, [KEY, VERSION_KEY, snapKey, SNAP_INDEX], [JSON.stringify(data), String(baseVersion ?? 0), String(now), String(keepSeconds), String(now - keepSeconds * 1000)]);
 
   if (ok === 1) return NextResponse.json({ version });
 

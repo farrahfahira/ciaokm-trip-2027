@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Trash2, RotateCcw, MapPin, Calendar, PiggyBank, CalendarDays, Wallet, Luggage, Check, ExternalLink, Link2, ArrowRight, CheckCheck, Lightbulb } from "lucide-react";
+import { Plus, Trash2, RotateCcw, MapPin, Calendar, PiggyBank, CalendarDays, Wallet, Luggage, Check, ExternalLink, Link2, ArrowRight, CheckCheck, Lightbulb, History as HistoryIcon } from "lucide-react";
 import { useSharedTrip } from "./useSharedTrip";
 import IdeasTab from "./IdeasTab";
+import HistoryPanel from "./HistoryPanel";
 
 const AVATAR = ["bg-rose-400", "bg-orange-400", "bg-amber-400", "bg-emerald-500", "bg-teal-500", "bg-sky-500", "bg-indigo-500", "bg-violet-500"];
 const DAY_TINT = ["bg-indigo-100 text-indigo-700", "bg-emerald-100 text-emerald-700", "bg-amber-100 text-amber-700", "bg-rose-100 text-rose-700", "bg-sky-100 text-sky-700", "bg-violet-100 text-violet-700"];
@@ -210,6 +211,7 @@ export default function App() {
   const [tab, setTab] = useState("itinerary");
   const [linkEdit, setLinkEdit] = useState(null);
   const [settleMode, setSettleMode] = useState("separate");
+  const [showHistory, setShowHistory] = useState(false);
 
   const { trip, currencies, people, days, expenses, packing } = data;
   const home = currencies[0];
@@ -220,8 +222,9 @@ export default function App() {
   const add = (k, row) => setData((d) => ({ ...d, [k]: [...d[k], row] }));
   const del = (k, i) => setData((d) => ({ ...d, [k]: d[k].filter((_, j) => j !== i) }));
   const reset = () => {
-    if (confirm("Reset everything to the starter template? This clears it for ALL friends.")) setData(defaults());
+    if (confirm("Reset everything to the starter template? This clears it for ALL friends.\n\nA backup is saved first, so you can undo this from History.")) setData(defaults(), { reason: "reset" });
   };
+  const restore = (snapshot) => setData(migrate(snapshot), { reason: "restore" });
 
   // ── savings ──
   const updMonth = (i, m, v) =>
@@ -408,6 +411,9 @@ export default function App() {
           </div>
           <div className="flex items-center gap-3 pb-2 shrink-0">
             <span className={`text-xs hidden sm:inline ${status === "error" ? "text-rose-500" : "text-slate-400"}`}>{STATUS_TEXT[status]}</span>
+            <button onClick={() => setShowHistory((v) => !v)} title="History" className={`p-1.5 rounded-md hover:text-slate-600 hover:bg-slate-100 ${showHistory ? "text-slate-700 bg-slate-100" : "text-slate-400"}`}>
+              <HistoryIcon size={15} />
+            </button>
             <button onClick={reset} title="Reset" className="p-1.5 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100">
               <RotateCcw size={15} />
             </button>
@@ -415,6 +421,8 @@ export default function App() {
         </div>
 
         <div className="mt-5">
+          {showHistory && <HistoryPanel onRestore={restore} onClose={() => setShowHistory(false)} />}
+
           {/* ═════════ SAVE ═════════ */}
           {tab === "save" && (
             <div className="space-y-4">
@@ -542,7 +550,9 @@ export default function App() {
             </div>
           )}
 
+          {/* ═════════ IDEAS ═════════ */}
           {tab === "ideas" && <IdeasTab data={data} setData={setData} />}
+
           {/* ═════════ ITINERARY ═════════ */}
           {tab === "itinerary" && (
             <div>
