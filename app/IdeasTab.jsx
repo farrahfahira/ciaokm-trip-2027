@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Plus, Trash2, Heart, CalendarPlus, Check, ImagePlus, X, Image as ImageIcon } from "lucide-react";
+import { Plus, Trash2, Heart, Check, ImagePlus, X, Bookmark, Image as ImageIcon } from "lucide-react";
 import IdeaPage from "./IdeaPage";
 import { Sheet } from "./MobileViews";
-import { IDEA_CATS, IDEA_LABEL, IDEA_TINT, uid, URL_RE, dayLabel, coverOf, firstLinkOf, titleOf, domainOf, uploadPhoto } from "./ideaUtils";
+import { IDEA_CATS, IDEA_LABEL, IDEA_TINT, IdeaPlaceholder, uid, URL_RE, coverOf, firstLinkOf, titleOf, domainOf, uploadPhoto } from "./ideaUtils";
 
 const ME_KEY = "trip-planner-me";
 const isEmptyRow = (r) => !r.time && !r.place && !r.link && !r.activity && !r.price && !r.notes;
@@ -14,7 +14,7 @@ const lbl = "block text-sm font-medium text-slate-600 mb-1.5";
 const Chip = ({ active, onClick, children }) => (
   <button
     onClick={onClick}
-    className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm border transition ${active ? "bg-violet-500 border-violet-500 text-white" : "bg-white border-slate-200 text-slate-600 hover:border-violet-300"}`}
+    className={`shrink-0 inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-sm border transition ${active ? "bg-violet-500 border-violet-500 text-white" : "bg-white border-slate-200 text-slate-600 hover:border-violet-300"}`}
   >
     {children}
   </button>
@@ -25,9 +25,8 @@ export default function IdeasTab({ data, setData }) {
   const ideas = data.ideas || [];
   const cities = data.ideaCities || [];
 
-  const [cityFilter, setCityFilter] = useState("all"); // "all" | id kota
+  const [cityFilter, setCityFilter] = useState("all");
   const [catFilter, setCatFilter] = useState("all");
-  const [sort, setSort] = useState("interest");
   const [me, setMe] = useState(null);
   const [newCity, setNewCity] = useState(null);
   const [openId, setOpenId] = useState(null);
@@ -97,16 +96,19 @@ export default function IdeasTab({ data, setData }) {
   };
 
   // ── kota ──
+  const createCity = (name) => {
+    const id = uid();
+    setData((d) => ({ ...d, ideaCities: [...(d.ideaCities || []), { id, name }] }));
+    return id;
+  };
   const addCity = () => {
     const name = (newCity || "").trim();
     if (!name) {
       setNewCity(null);
       return;
     }
-    const id = uid();
-    setData((d) => ({ ...d, ideaCities: [...(d.ideaCities || []), { id, name }] }));
+    setCityFilter(createCity(name));
     setNewCity(null);
-    setCityFilter(id);
   };
   const renameCity = (id, name) => setData((d) => ({ ...d, ideaCities: (d.ideaCities || []).map((c) => (c.id === id ? { ...c, name } : c)) }));
   const delCity = (id) => {
@@ -120,7 +122,7 @@ export default function IdeasTab({ data, setData }) {
     setCityFilter("all");
   };
 
-  // ── pindah ke itinerary ──
+  // ── masukkan ke itinerary ──
   const moveToDay = (idea, dayId) => {
     const link = firstLinkOf(idea);
     const row = { id: uid(), time: "", place: idea.text || domainOf(link) || "Ide", link, activity: idea.cat ? IDEA_LABEL[idea.cat] : "", price: "", notes: idea.note || "" };
@@ -166,15 +168,13 @@ export default function IdeasTab({ data, setData }) {
       setDraftCity(null);
       return;
     }
-    const id = uid();
-    setData((d) => ({ ...d, ideaCities: [...(d.ideaCities || []), { id, name }] }));
+    const id = createCity(name);
     setDraft((d) => ({ ...d, city: id }));
     setDraftCity(null);
   };
   const saveIdea = () => {
     let text = draft.text.trim();
     let link = draft.link.trim();
-    // Kalau link ditempel di kolom nama, pindahkan ke kolom link
     const m = !link && text.match(URL_RE);
     if (m) {
       link = m[0];
@@ -203,15 +203,13 @@ export default function IdeasTab({ data, setData }) {
     setDraft(null);
   };
 
-  // ── hitungan & urutan ──
+  // ── urutan: paling banyak hati, lalu terbaru; yang sudah masuk itinerary di akhir ──
   const likesOf = (x) => (x.likes || []).filter((p) => p < people.length);
-  const inCity = (id) => ideas.filter((x) => cityOf(x) === id);
-  const cityHearts = (id) => inCity(id).reduce((s, x) => s + likesOf(x).length, 0);
-
+  const countIn = (id) => ideas.filter((x) => cityOf(x) === id).length;
   const visible = ideas
     .filter((x) => activeCity === "all" || cityOf(x) === activeCity)
     .filter((x) => catFilter === "all" || (x.cat || "") === catFilter)
-    .sort((a, b) => Number(!!a.planned) - Number(!!b.planned) || (sort === "interest" ? likesOf(b).length - likesOf(a).length : 0) || (b.created || 0) - (a.created || 0));
+    .sort((a, b) => Number(!!a.planned) - Number(!!b.planned) || likesOf(b).length - likesOf(a).length || (b.created || 0) - (a.created || 0));
 
   // ── halaman ide ──
   if (openId) {
@@ -225,13 +223,11 @@ export default function IdeasTab({ data, setData }) {
             cities={cities}
             days={days}
             me={me}
-            needMe={false}
-            setMe={() => {}}
             setIdea={setIdeaById(idea.id)}
             onToggleLike={() => toggleLike(idea)}
             onMoveToDay={(dayId) => moveToDay(idea, dayId)}
+            onAddCity={createCity}
             onDelete={() => {
-              if (!confirm("Hapus ide ini beserta fotonya?")) return;
               setIdeas((xs) => xs.filter((x) => x.id !== idea.id));
               closeIdea();
             }}
@@ -251,10 +247,10 @@ export default function IdeasTab({ data, setData }) {
 
   // ── papan ide ──
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-sm text-slate-500">{ideas.length} ide</span>
-        <button onClick={openNew} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium text-white bg-violet-500 hover:bg-violet-600 active:bg-violet-600">
+    <div className="space-y-3">
+      {/* Tombol tambah (laptop) */}
+      <div className="hidden md:flex justify-end">
+        <button onClick={openNew} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium text-white bg-violet-500 hover:bg-violet-600">
           <Plus size={16} /> Tambah ide
         </button>
       </div>
@@ -267,8 +263,8 @@ export default function IdeasTab({ data, setData }) {
         {cities.map((c) => (
           <Chip key={c.id} active={activeCity === c.id} onClick={() => setCityFilter(c.id)}>
             {c.name || "Tanpa nama"}
-            <span className="inline-flex items-center gap-1 opacity-70">
-              <Heart size={13} /> {cityHearts(c.id)}
+            <span className="inline-flex items-center gap-0.5 opacity-70">
+              <Bookmark size={13} /> {countIn(c.id)}
             </span>
           </Chip>
         ))}
@@ -318,30 +314,24 @@ export default function IdeasTab({ data, setData }) {
         </div>
       )}
 
-      {/* Kategori + urutan */}
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex gap-1.5 overflow-x-auto -ml-4 pl-4 md:ml-0 md:pl-0 md:flex-wrap scrollbar-none">
-          {["all", ...IDEA_CATS].map((c) => (
-            <button
-              key={c}
-              onClick={() => setCatFilter(c)}
-              className={`shrink-0 text-xs px-2.5 py-1 rounded-md transition ${catFilter === c ? (c === "all" ? "bg-slate-700 text-white" : `${IDEA_TINT[c]} ring-1 ring-current`) : "text-slate-500 hover:bg-slate-100"}`}
-            >
-              {c === "all" ? "Semua" : IDEA_LABEL[c]}
-            </button>
-          ))}
-        </div>
-        <select value={sort} onChange={(e) => setSort(e.target.value)} className="shrink-0 text-xs bg-slate-100 rounded-md px-2 py-1.5 cursor-pointer focus:outline-none focus:ring-2 focus:ring-violet-300">
-          <option value="interest">Paling diminati</option>
-          <option value="newest">Terbaru</option>
-        </select>
+      {/* Kategori */}
+      <div className="flex gap-1.5 overflow-x-auto -mx-4 px-4 md:mx-0 md:px-0 md:flex-wrap scrollbar-none">
+        {["all", ...IDEA_CATS].map((c) => (
+          <button
+            key={c}
+            onClick={() => setCatFilter(c)}
+            className={`shrink-0 text-xs px-3 py-1.5 rounded-full transition ${catFilter === c ? (c === "all" ? "bg-slate-700 text-white" : `${IDEA_TINT[c]} ring-1 ring-current`) : "text-slate-500 hover:bg-slate-100"}`}
+          >
+            {c === "all" ? "Semua" : IDEA_LABEL[c]}
+          </button>
+        ))}
       </div>
 
       {/* Kartu */}
       {visible.length === 0 ? (
         <div className="bg-white rounded-xl border border-dashed border-slate-300 text-center text-sm text-slate-400 py-12">{ideas.length === 0 ? "Belum ada ide." : "Tidak ada yang cocok."}</div>
       ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 items-start">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
           {visible.map((x) => {
             const likes = likesOf(x);
             const mine = me !== null && likes.includes(me);
@@ -349,7 +339,6 @@ export default function IdeasTab({ data, setData }) {
             const nPhotos = (x.photos || []).length;
             const cityName = cities.find((c) => c.id === cityOf(x))?.name;
             const meta = [x.cat && IDEA_LABEL[x.cat], cityName].filter(Boolean).join(" · ");
-            const firstLine = (x.note || "").split("\n").find((l) => l.trim()) || "";
             const plannedIdx = x.planned ? days.findIndex((d) => d.id === x.plannedDay) : -1;
             return (
               <div
@@ -360,55 +349,49 @@ export default function IdeasTab({ data, setData }) {
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && e.target === e.currentTarget) openIdea(x.id);
                 }}
-                className={`bg-white rounded-xl border border-slate-200 overflow-hidden cursor-pointer hover:border-violet-300 hover:shadow-sm active:bg-slate-50 transition focus:outline-none focus:ring-2 focus:ring-violet-300 ${x.planned ? "opacity-60" : ""}`}
+                className={`bg-white rounded-xl border border-slate-200 overflow-hidden cursor-pointer hover:border-violet-300 hover:shadow-sm active:bg-slate-50 transition focus:outline-none focus:ring-2 focus:ring-violet-300 ${x.planned ? "opacity-70" : ""}`}
               >
-                {cover && (
-                  <div className="relative aspect-[4/3] bg-slate-100">
-                    <img src={cover.url} alt="" loading="lazy" className="w-full h-full object-cover" />
+                <div className="relative aspect-square bg-slate-100">
+                  {cover ? <img src={cover.url} alt="" loading="lazy" className="w-full h-full object-cover" /> : <IdeaPlaceholder cat={x.cat} className="w-full h-full" />}
+                  {x.planned && (
+                    <span className="absolute top-1.5 left-1.5 inline-flex items-center gap-1 text-[11px] font-medium bg-emerald-500 text-white px-1.5 py-0.5 rounded">
+                      <Check size={11} strokeWidth={3} /> {plannedIdx >= 0 ? `Hari ${plannedIdx + 1}` : "Itinerary"}
+                    </span>
+                  )}
+                  {nPhotos > 1 && (
                     <span className="absolute bottom-1.5 right-1.5 inline-flex items-center gap-1 text-[11px] bg-white/90 text-slate-600 px-1.5 py-0.5 rounded">
                       <ImageIcon size={11} /> {nPhotos}
                     </span>
-                  </div>
-                )}
-                <div className="p-3">
+                  )}
+                </div>
+                <div className="px-3 pt-2.5 pb-2">
                   <div className="text-sm font-semibold text-slate-800 truncate">{titleOf(x)}</div>
-                  {meta && <div className="text-xs text-slate-500 mt-0.5 truncate">{meta}</div>}
-                  {!cover && firstLine && <div className="text-xs text-slate-400 mt-2 line-clamp-2">{firstLine}</div>}
-                  <div className="flex items-center justify-between mt-3 -mb-1">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleLike(x);
-                      }}
-                      className={`inline-flex items-center gap-1 text-xs px-1.5 py-1.5 -ml-1.5 rounded-md transition ${mine ? "text-rose-600" : "text-slate-400 hover:text-rose-500 hover:bg-rose-50"}`}
-                    >
-                      <Heart size={15} fill={mine ? "currentColor" : "none"} /> {likes.length}
-                    </button>
-                    {x.planned ? (
-                      <span className="inline-flex items-center gap-1 text-xs text-emerald-600">
-                        <Check size={13} /> {plannedIdx >= 0 ? `Hari ${plannedIdx + 1}` : "Masuk itinerary"}
-                      </span>
-                    ) : (
-                      days.length > 0 && (
-                        <label onClick={(e) => e.stopPropagation()} title="Pindah ke hari" className="relative p-1.5 -mr-1.5 rounded-md text-slate-400 hover:text-violet-600 hover:bg-violet-50 cursor-pointer">
-                          <CalendarPlus size={16} />
-                          <select value="" onChange={(e) => e.target.value && moveToDay(x, e.target.value)} className="absolute inset-0 w-full opacity-0 cursor-pointer">
-                            <option value="">Pilih hari</option>
-                            {days.map((d, i) => (
-                              <option key={d.id} value={d.id}>
-                                {dayLabel(d, i)}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      )
-                    )}
-                  </div>
+                  <div className="text-xs text-slate-400 truncate h-4">{meta}</div>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleLike(x);
+                    }}
+                    className={`inline-flex items-center gap-1 text-xs mt-1.5 px-1.5 py-1 -ml-1.5 rounded-md transition ${mine ? "text-rose-600" : "text-slate-400 hover:text-rose-500 hover:bg-rose-50"}`}
+                  >
+                    <Heart size={15} fill={mine ? "currentColor" : "none"} /> {likes.length}
+                  </button>
                 </div>
               </div>
             );
           })}
         </div>
+      )}
+
+      {/* Tombol tambah melayang (HP) */}
+      {!draft && (
+        <button
+          onClick={openNew}
+          style={{ bottom: "calc(env(safe-area-inset-bottom) + 80px)" }}
+          className="md:hidden fixed right-4 z-30 inline-flex items-center gap-1.5 pl-4 pr-5 py-3 rounded-full text-sm font-semibold text-white bg-violet-500 active:bg-violet-600 shadow-lg shadow-violet-500/30"
+        >
+          <Plus size={18} /> Tambah ide
+        </button>
       )}
 
       {/* Form tambah ide */}
@@ -503,7 +486,7 @@ export default function IdeasTab({ data, setData }) {
                 {draft.photos.map((ph) => (
                   <div key={ph.id} className="relative aspect-square rounded-lg overflow-hidden bg-slate-100">
                     <img src={ph.url} alt="" className="w-full h-full object-cover" />
-                    <button onClick={() => setDraft((d) => ({ ...d, photos: d.photos.filter((x) => x.id !== ph.id) }))} aria-label="Hapus foto" className="absolute top-1 right-1 p-1 rounded-full bg-black/50 text-white">
+                    <button onClick={() => setDraft((d) => ({ ...d, photos: d.photos.filter((p) => p.id !== ph.id) }))} aria-label="Hapus foto" className="absolute top-1 right-1 p-1 rounded-full bg-black/50 text-white">
                       <X size={12} />
                     </button>
                   </div>

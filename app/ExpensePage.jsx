@@ -17,11 +17,11 @@ export default function ExpensePage({ expense: e, people, fmt, onBack, onEdit, o
 
   const mark = (j) => onSetPaid([{ id: e.id, j }], true);
   const unmark = (j) => {
-    if (confirm(`${nameOf(j)} belum bayar?`)) onSetPaid([{ id: e.id, j }], false);
+    if (confirm(`${nameOf(j)} belum membayar?`)) onSetPaid([{ id: e.id, j }], false);
   };
   const markText = (j) => {
     const m = e.paid && e.paid[j];
-    if (!m) return "Lunas dari sebelumnya";
+    if (!m) return "Lunas sebelumnya";
     const who = m.by != null && people[m.by] ? `Ditandai ${people[m.by].name}` : "Ditandai";
     return m.at ? `${who}, ${fmtDay(m.at)}` : who;
   };
@@ -52,7 +52,7 @@ export default function ExpensePage({ expense: e, people, fmt, onBack, onEdit, o
           <span className={`text-xs font-medium px-2 py-0.5 rounded-md ${CAT_TINT[cat]}`}>{CAT_LABEL[cat]}</span>
           <h2 className="text-2xl font-bold text-slate-800 mt-2 break-words">{e.item || "Tanpa nama"}</h2>
           <p className="text-sm text-slate-500 mt-1">
-            {fund ? "Dibayar pakai kas" : payer !== null ? `${nameOf(payer)} yang bayar` : "Belum jelas siapa yang bayar"}, dibagi {split.length} orang
+            {fund ? "Dibayar dengan kas" : payer !== null ? `${nameOf(payer)} yang membayar` : "Belum jelas siapa yang membayar"}, dibagi {split.length} orang
           </p>
         </div>
         <div className="text-right shrink-0">
@@ -72,7 +72,7 @@ export default function ExpensePage({ expense: e, people, fmt, onBack, onEdit, o
               </div>
             ))}
           </div>
-          <p className="text-xs text-slate-400 mt-2">Pakai kas, jadi nggak ada yang perlu dibayar balik.</p>
+          <p className="text-xs text-slate-400 mt-2">Dibayar dengan kas, jadi tidak ada yang perlu dibayar kembali.</p>
         </section>
       ) : (
         payer !== null && (
@@ -88,8 +88,8 @@ export default function ExpensePage({ expense: e, people, fmt, onBack, onEdit, o
             <div className="rounded-xl border border-slate-200 divide-y divide-slate-100">
               <div className="flex items-center gap-3 px-3 py-2.5 text-sm">
                 <Person j={payer} />
-                <span className="text-xs text-slate-400">yang bayar</span>
-                <span className="ml-auto text-slate-500">{split.includes(payer) ? fmt(each, e.cur) : "nggak ikut"}</span>
+                <span className="text-xs text-slate-400">yang membayar</span>
+                <span className="ml-auto text-slate-500">{split.includes(payer) ? fmt(each, e.cur) : "tidak ikut"}</span>
               </div>
               {others.map((j) => (
                 <div key={j} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2.5 text-sm">
@@ -112,7 +112,7 @@ export default function ExpensePage({ expense: e, people, fmt, onBack, onEdit, o
                 </div>
               ))}
             </div>
-            {others.length === 0 && <p className="text-xs text-slate-400 mt-2">Cuma {nameOf(payer)} yang ikut, jadi nggak ada yang perlu dibayar.</p>}
+            {others.length === 0 && <p className="text-xs text-slate-400 mt-2">Hanya {nameOf(payer)} yang ikut, jadi tidak ada yang perlu dibayar.</p>}
           </section>
         )
       )}

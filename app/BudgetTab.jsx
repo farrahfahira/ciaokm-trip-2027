@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Plus, Settings2, Trash2, X } from "lucide-react";
+import { Plus, Settings2, Trash2, X, CheckCheck } from "lucide-react";
 import ExpensePage from "./ExpensePage";
-import { CATS, CAT_LABEL, CAT_TINT, FUND, num, isFund, normCat, sharesOf, Avatar, MoneyInput } from "./shared";
+import { Sheet } from "./MobileViews";
+import { CATS, CAT_LABEL, CAT_TINT, FUND, num, isFund, normCat, sharesOf, allShares, fmtDay, Avatar, MoneyInput } from "./shared";
 
 const uid = () => Math.random().toString(36).slice(2, 9);
 
@@ -37,7 +38,7 @@ function ExpenseEditor({ draft, setDraft, error, people, activeIdx, isActive, cu
         </div>
 
         <div>
-          <label className={label}>Buat apa?</label>
+          <label className={label}>Untuk apa?</label>
           <input autoFocus={draft.isNew} value={draft.item} onChange={(ev) => set("item", ev.target.value)} placeholder="Makan malam di pasar malam" className={field} />
         </div>
 
@@ -71,13 +72,13 @@ function ExpenseEditor({ draft, setDraft, error, people, activeIdx, isActive, cu
         </div>
 
         <div>
-          <label className={label}>Siapa yang bayar?</label>
+          <label className={label}>Siapa yang membayar?</label>
           <select value={draft.paidBy} onChange={(ev) => set("paidBy", Number(ev.target.value))} className={`${field} cursor-pointer`}>
-            <option value={FUND}>Kas (tabungan bareng)</option>
+            <option value={FUND}>Kas (tabungan bersama)</option>
             {payers.map((j) => (
               <option key={j} value={j}>
                 {people[j].name}
-                {people[j].removed ? " (udah keluar)" : ""}
+                {people[j].removed ? " (sudah keluar)" : ""}
               </option>
             ))}
           </select>
@@ -159,9 +160,21 @@ export default function BudgetTab({
   const [editing, setEditing] = useState(null);
   const [error, setError] = useState("");
   const [showSettings, setShowSettings] = useState(false);
+  const [showPaid, setShowPaid] = useState(false);
 
   const meActive = meIdx !== null && isActive(meIdx);
   const homeOf = (e) => num(e.amount) * rateOf(e.cur);
+  const nameOf = (j) => people[j]?.name || "Seseorang";
+
+  // ── riwayat lunas ──
+  const paidList = allShares(expenses, people.length)
+    .filter((s) => s.paid)
+    .sort((a, b) => ((b.mark && b.mark.at) || 0) - ((a.mark && a.mark.at) || 0));
+  const markText = (d) => {
+    if (!d.mark) return "Lunas sebelumnya";
+    const who = d.mark.by != null && people[d.mark.by] ? `Ditandai ${people[d.mark.by].name}` : "Ditandai";
+    return d.mark.at ? `${who}, ${fmtDay(d.mark.at)}` : who;
+  };
 
   // ── form ──
   const blank = () => ({
@@ -182,15 +195,15 @@ export default function BudgetTab({
   };
   const saveExpense = () => {
     const d = editing;
-    if (!String(d.item || "").trim()) return setError("Isi namanya dulu.");
-    if (num(d.amount) <= 0) return setError("Isi jumlahnya.");
+    if (!String(d.item || "").trim()) return setError("Nama pengeluaran belum diisi.");
+    if (num(d.amount) <= 0) return setError("Jumlah belum diisi.");
     if (!d.split.filter((j) => j < people.length).length) return setError("Pilih minimal satu orang.");
     const { isNew, ...exp } = d;
     const before = expenses.find((x) => x.id === exp.id);
     if (before && before.paidBy !== exp.paidBy) {
       exp.paid = {};
       exp.settled = false;
-    } // ganti yang bayar = tanda lunas direset
+    } // ganti yang membayar = tanda lunas direset
     setData((s) => ({
       ...s,
       expenses: s.expenses.some((x) => x.id === exp.id) ? s.expenses.map((x) => (x.id === exp.id ? exp : x)) : [...s.expenses, exp],
@@ -245,7 +258,7 @@ export default function BudgetTab({
           />
         ) : (
           <div className="bg-white rounded-xl border border-slate-200 p-10 text-center space-y-3">
-            <p className="text-sm text-slate-500">Pengeluaran ini udah dihapus.</p>
+            <p className="text-sm text-slate-500">Pengeluaran ini sudah dihapus.</p>
             <button onClick={closeExpense} className="text-sm font-medium text-amber-700 hover:bg-amber-50 px-3 py-1.5 rounded-lg">
               Kembali
             </button>
@@ -267,7 +280,7 @@ export default function BudgetTab({
   };
   const subOf = (e) => {
     const split = e.split.filter((j) => j < people.length);
-    const payer = isFund(e) ? "Pakai kas" : `${people[e.paidBy]?.name || "?"} bayar`;
+    const payer = isFund(e) ? "Dibayar dengan kas" : `${nameOf(e.paidBy)} yang membayar`;
     const everyone = activeIdx.length > 1 && activeIdx.every((j) => split.includes(j)) && split.length === activeIdx.length;
     return `${payer}, ${everyone ? "dibagi semua" : `dibagi ${split.length} orang`}`;
   };
@@ -293,6 +306,11 @@ export default function BudgetTab({
             </button>
           </div>
         </div>
+
+        <button onClick={() => setShowPaid(true)} className="mt-4 inline-flex items-center gap-1.5 text-sm text-slate-600 border border-slate-200 hover:bg-slate-50 active:bg-slate-50 px-3 py-2 rounded-lg">
+          <CheckCheck size={15} className="text-emerald-500" /> Riwayat lunas
+          {paidList.length > 0 && <span className="text-xs text-slate-400">{paidList.length}</span>}
+        </button>
 
         {showSettings && (
           <div className="mt-5 pt-4 border-t border-slate-100 space-y-2">
@@ -333,7 +351,7 @@ export default function BudgetTab({
             </button>
           </div>
         )}
-        {missingRate && <p className="text-xs text-rose-500 mt-3">Ada mata uang yang belum ada kursnya, jadi totalnya belum akurat.</p>}
+        {missingRate && <p className="text-xs text-rose-500 mt-3">Ada mata uang yang belum memiliki kurs, sehingga total belum akurat.</p>}
       </div>
 
       {groups.length === 0 ? (
@@ -370,6 +388,50 @@ export default function BudgetTab({
             </div>
           ))}
         </div>
+      )}
+
+      {/* Riwayat lunas */}
+      {showPaid && (
+        <Sheet title="Riwayat lunas" onClose={() => setShowPaid(false)}>
+          {paidList.length === 0 ? (
+            <p className="text-sm text-slate-400 py-6 text-center">Belum ada yang lunas.</p>
+          ) : (
+            <div className="divide-y divide-slate-100 -my-2">
+              {paidList.map((d) => (
+                <div key={`${d.e.id}-${d.from}`} className="flex items-start gap-3 py-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm text-slate-700">
+                      <span className="font-medium">{nameOf(d.from)}</span> <span className="text-slate-400">→</span> <span className="font-medium">{nameOf(d.to)}</span>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setShowPaid(false);
+                        openExpense(d.e.id);
+                      }}
+                      className="text-xs text-slate-500 hover:text-indigo-600 truncate max-w-full text-left"
+                    >
+                      {d.e.item || "Tanpa nama"}
+                    </button>
+                    <div className="text-[11px] text-slate-400">{markText(d)}</div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className="text-sm font-semibold text-slate-700">{fmt(d.amount, d.cur)}</div>
+                    {d.mark && (
+                      <button
+                        onClick={() => {
+                          if (confirm(`${nameOf(d.from)} belum membayar?`)) onSetPaid([{ id: d.e.id, j: d.from }], false);
+                        }}
+                        className="text-xs text-slate-400 hover:text-rose-500 mt-1"
+                      >
+                        Batalkan
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Sheet>
       )}
 
       {editor}

@@ -289,6 +289,7 @@ export default function App() {
 
   const goTab = (id) => {
     setTab(id);
+    if (id !== "save") setShowManage(false);
     if (id === "ideas" || id === "itinerary") {
       setPlanSub(id);
       localStorage.setItem(PLAN_KEY, id);
@@ -451,7 +452,7 @@ export default function App() {
     { id: "profile", label: "Profil", color: "text-violet-600" },
   ];
   const navActive = (id) => !viewingMember && (id === "plan" ? tab === "ideas" || tab === "itinerary" : tab === id);
-  const isPlan = tab === "ideas" || tab === "itinerary";
+  const showHeader = tab === "save" && !viewingMember;
 
   if (!ready) {
     return <div className="min-h-screen bg-slate-50 flex items-center justify-center text-sm text-slate-400">{status === "error" ? "Gagal memuat. Mencoba lagi…" : "Memuat…"}</div>;
@@ -518,47 +519,49 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-700 px-4 pt-4 pb-28 md:p-8">
       <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
-          <div className="h-1.5 bg-gradient-to-r from-rose-400 via-amber-400 to-indigo-500" />
-          <div className="p-4 md:p-6">
-            <div className="flex items-start justify-between gap-3">
-              <Cell value={trip.name} onChange={(v) => setTrip("name", v)} className="text-2xl md:text-3xl font-bold text-slate-800 -ml-2" />
-              {countdown && <span className="shrink-0 bg-indigo-50 text-indigo-700 text-xs md:text-sm font-medium px-3 py-1.5 rounded-full">{countdown}</span>}
-            </div>
-            <div className="flex flex-wrap gap-2 mt-3 text-sm">
-              <label className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-lg pl-2.5">
-                <MapPin size={15} className="text-rose-500" />
-                <Cell value={trip.dest} onChange={(v) => setTrip("dest", v)} className="w-44" placeholder="Tujuan" />
-              </label>
-              <label className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-lg pl-2.5">
-                <Calendar size={15} className="text-emerald-500" />
-                <Cell type="date" value={trip.start} onChange={(v) => setTrip("start", v)} className="w-36" />
-                <span className="text-slate-400">→</span>
-                <Cell type="date" value={trip.end} onChange={(v) => setTrip("end", v)} className="w-36" />
-              </label>
-            </div>
-            <div className="flex flex-wrap items-center gap-y-2 mt-4">
-              <div className="flex -space-x-1.5">
-                {activeIdx.map((i) => (
-                  <button key={people[i].id || i} onClick={() => openMember(i)} title={people[i].name} className={`rounded-full ring-2 hover:z-10 hover:scale-110 transition ${memberIdx === i ? "ring-indigo-400 z-10" : "ring-white"}`}>
-                    <Avatar name={people[i].name} i={i} photo={people[i].photo} size="w-8 h-8 text-xs md:w-7 md:h-7" />
-                  </button>
-                ))}
+        {/* Header trip (hanya di Nabung) */}
+        {showHeader && (
+          <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+            <div className="h-1.5 bg-gradient-to-r from-rose-400 via-amber-400 to-indigo-500" />
+            <div className="p-4 md:p-6">
+              <div className="flex items-start justify-between gap-3">
+                <Cell value={trip.name} onChange={(v) => setTrip("name", v)} className="text-2xl md:text-3xl font-bold text-slate-800 -ml-2" />
+                {countdown && <span className="shrink-0 bg-indigo-50 text-indigo-700 text-xs md:text-sm font-medium px-3 py-1.5 rounded-full">{countdown}</span>}
               </div>
-              <span className="text-sm text-slate-500 ml-3">{activeIdx.length} anggota</span>
-              <button
-                onClick={() => setShowManage((v) => !v)}
-                className={`ml-2 inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg transition ${showManage ? "bg-indigo-100 text-indigo-700" : "text-indigo-600 hover:bg-indigo-50"}`}
-              >
-                <Users size={14} /> Atur
-              </button>
+              <div className="flex flex-wrap gap-2 mt-3 text-sm">
+                <label className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-lg pl-2.5">
+                  <MapPin size={15} className="text-rose-500" />
+                  <Cell value={trip.dest} onChange={(v) => setTrip("dest", v)} className="w-44" placeholder="Tujuan" />
+                </label>
+                <label className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-lg pl-2.5">
+                  <Calendar size={15} className="text-emerald-500" />
+                  <Cell type="date" value={trip.start} onChange={(v) => setTrip("start", v)} className="w-36" />
+                  <span className="text-slate-400">→</span>
+                  <Cell type="date" value={trip.end} onChange={(v) => setTrip("end", v)} className="w-36" />
+                </label>
+              </div>
+              <div className="flex flex-wrap items-center gap-y-2 mt-4">
+                <div className="flex -space-x-1.5">
+                  {activeIdx.map((i) => (
+                    <button key={people[i].id || i} onClick={() => openMember(i)} title={people[i].name} className="rounded-full ring-2 ring-white hover:z-10 hover:scale-110 transition">
+                      <Avatar name={people[i].name} i={i} photo={people[i].photo} size="w-8 h-8 text-xs md:w-7 md:h-7" />
+                    </button>
+                  ))}
+                </div>
+                <span className="text-sm text-slate-500 ml-3">{activeIdx.length} anggota</span>
+                <button
+                  onClick={() => setShowManage((v) => !v)}
+                  className={`ml-2 inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg transition ${showManage ? "bg-indigo-100 text-indigo-700" : "text-indigo-600 hover:bg-indigo-50"}`}
+                >
+                  <Users size={14} /> Atur
+                </button>
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
         {/* Tab (laptop) + status + profil */}
-        <div className="flex items-end justify-between mt-4 md:mt-6 md:border-b border-slate-200">
+        <div className={`flex items-end justify-between ${showHeader ? "mt-4 md:mt-6" : ""} md:border-b border-slate-200`}>
           <div className="hidden md:flex gap-1">
             {tabs.map(({ id, label, Icon, on }) => (
               <button
@@ -582,7 +585,7 @@ export default function App() {
         </div>
 
         <div className="mt-3 md:mt-5">
-          {showManage && (
+          {showManage && showHeader && (
             <ManagePanel
               people={people}
               onRename={(i, v) => upd("people", i, "name", v)}

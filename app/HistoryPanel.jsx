@@ -5,7 +5,7 @@ import { X, RotateCcw } from "lucide-react";
 
 const fmtTime = (ms) => new Date(ms).toLocaleString("id-ID", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 const fmtDay = (ymd) => new Date(ymd + "T00:00:00").toLocaleDateString("id-ID", { weekday: "short", day: "numeric", month: "short" });
-const titleOf = (s) => (s.type === "daily" ? `Awal hari ${fmtDay(s.day)}` : s.type === "reset" ? `Sebelum reset, ${fmtTime(s.at)}` : `Sebelum dibalikin, ${fmtTime(s.at)}`);
+const titleOf = (s) => (s.type === "daily" ? `Awal hari ${fmtDay(s.day)}` : s.type === "reset" ? `Sebelum reset, ${fmtTime(s.at)}` : `Sebelum dipulihkan, ${fmtTime(s.at)}`);
 
 export default function HistoryPanel({ onRestore, onClose }) {
   const [snaps, setSnaps] = useState(null);
@@ -16,11 +16,11 @@ export default function HistoryPanel({ onRestore, onClose }) {
     fetch("/api/trip/history", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then((b) => setSnaps(b.snapshots || []))
-      .catch(() => setError("Gagal memuat backup."));
+      .catch(() => setError("Gagal memuat cadangan."));
   }, []);
 
   const restore = async (s) => {
-    if (!confirm(`Balikin trip ke "${titleOf(s)}"?\n\nIni ngubah data buat semua orang. Versi sekarang di-backup dulu.`)) return;
+    if (!confirm(`Pulihkan trip ke "${titleOf(s)}"?\n\nIni akan mengubah data untuk semua orang. Versi saat ini akan dicadangkan terlebih dahulu.`)) return;
     setBusy(s.id);
     setError("");
     try {
@@ -30,7 +30,7 @@ export default function HistoryPanel({ onRestore, onClose }) {
       onRestore(b.data);
       onClose();
     } catch {
-      setError("Gagal balikin backup ini.");
+      setError("Gagal memulihkan cadangan ini.");
       setBusy(null);
     }
   };
@@ -47,7 +47,7 @@ export default function HistoryPanel({ onRestore, onClose }) {
       </div>
       {error && <div className="text-xs text-rose-500 mb-2">{error}</div>}
       {snaps === null && !error && <div className="text-sm text-slate-400 py-4">Memuat…</div>}
-      {snaps && snaps.length === 0 && <div className="text-sm text-slate-400 py-4">Belum ada backup.</div>}
+      {snaps && snaps.length === 0 && <div className="text-sm text-slate-400 py-4">Belum ada cadangan.</div>}
       {snaps && snaps.length > 0 && (
         <div className="divide-y divide-slate-100 max-h-80 overflow-y-auto">
           {snaps.map((s) => (
@@ -55,7 +55,7 @@ export default function HistoryPanel({ onRestore, onClose }) {
               <span className={`w-2 h-2 rounded-full shrink-0 ${s.type === "daily" ? "bg-slate-300" : "bg-amber-400"}`} />
               <span className="text-slate-700">{titleOf(s)}</span>
               <button onClick={() => restore(s)} disabled={busy !== null} className="ml-auto inline-flex items-center gap-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50 px-2.5 py-1.5 rounded-md disabled:opacity-50">
-                <RotateCcw size={13} /> {busy === s.id ? "Membalikin…" : "Balikin"}
+                <RotateCcw size={13} /> {busy === s.id ? "Memulihkan…" : "Pulihkan"}
               </button>
             </div>
           ))}

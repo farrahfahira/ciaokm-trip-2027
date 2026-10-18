@@ -28,7 +28,7 @@ export default function ManagePanel({ people, onRename, onSetPhoto, onRemove, on
       const photo = await uploadPhoto(file, 400);
       onSetPhoto(i, photo.url);
     } catch (e) {
-      setError(e.message || "Gagal upload foto.");
+      setError(e.message || "Gagal mengunggah foto.");
     }
     setBusy(null);
     setTarget(null);
@@ -70,10 +70,10 @@ export default function ManagePanel({ people, onRename, onSetPhoto, onRemove, on
                 Hapus foto
               </button>
             )}
-            <button onClick={() => onOpenMember(i)} title="Buka halaman" className="p-2 rounded-md text-slate-400 hover:text-indigo-600 hover:bg-indigo-50">
+            <button onClick={() => onOpenMember(i)} title="Buka profil" className="p-2 rounded-md text-slate-400 hover:text-indigo-600 hover:bg-indigo-50">
               <ArrowRight size={16} />
             </button>
-            <button onClick={() => onRemove(i)} title="Keluarin" className="p-2 rounded-md text-slate-300 hover:text-rose-500 hover:bg-rose-50">
+            <button onClick={() => onRemove(i)} title="Keluarkan" className="p-2 rounded-md text-slate-300 hover:text-rose-500 hover:bg-rose-50">
               <UserMinus size={16} />
             </button>
           </div>
@@ -97,12 +97,12 @@ export default function ManagePanel({ people, onRename, onSetPhoto, onRemove, on
           <Plus size={16} /> Tambah
         </button>
       </form>
-      <p className="text-xs text-slate-400 mt-2">Tap foto buat ganti. Anggota baru nggak otomatis ikut pengeluaran yang udah ada.</p>
+      <p className="text-xs text-slate-400 mt-2">Ketuk foto untuk mengganti. Anggota baru tidak otomatis ikut pengeluaran yang sudah ada.</p>
       {error && <p className="text-xs text-rose-500 mt-2">{error}</p>}
 
       {removed.length > 0 && (
         <div className="mt-4 pt-3 border-t border-slate-100">
-          <div className="text-xs font-semibold text-slate-500 mb-1">Udah keluar</div>
+          <div className="text-xs font-semibold text-slate-500 mb-1">Sudah keluar</div>
           {removed.map(({ p, i }) => (
             <div key={p.id || i} className="flex items-center gap-3 py-1.5 text-sm text-slate-500">
               <Avatar name={p.name} i={i} photo={p.photo} size="w-7 h-7 text-xs" className="grayscale opacity-60" />
@@ -111,7 +111,7 @@ export default function ManagePanel({ people, onRename, onSetPhoto, onRemove, on
                 Lihat
               </button>
               <button onClick={() => onRestore(i)} className="inline-flex items-center gap-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50 px-2 py-1 rounded-md">
-                <RotateCcw size={12} /> Balikin
+                <RotateCcw size={12} /> Kembalikan
               </button>
             </div>
           ))}

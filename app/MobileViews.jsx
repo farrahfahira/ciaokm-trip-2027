@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Plus, Trash2, X, Check, ChevronRight, ExternalLink } from "lucide-react";
+import { Plus, Trash2, X, ChevronRight, ExternalLink } from "lucide-react";
 import { num, Avatar, MoneyInput } from "./shared";
 
 const uid = () => Math.random().toString(36).slice(2, 9);
@@ -206,7 +206,7 @@ export function ItineraryMobile({ days, setDays }) {
               <input value={editRow.activity} onChange={(e) => updRow("activity", e.target.value)} placeholder="Makan siang" className={field} />
             </div>
             <div>
-              <label className={lbl}>Kira-kira harga</label>
+              <label className={lbl}>Perkiraan harga</label>
               <input value={editRow.price} onChange={(e) => updRow("price", e.target.value)} placeholder="RM20-40" className={field} />
             </div>
             <div>
@@ -224,8 +224,6 @@ export function ItineraryMobile({ days, setDays }) {
   );
 }
 
-// ── Nabung versi HP ──
-// ── Kotak isi setoran (muncul di tengah) ──
 // ── Kotak isi setoran (muncul di tengah) ──
 export function AmountDialog({ title, subtitle, value, monthly, fmt, onSave, onClose }) {
   const [v, setV] = useState(value === "" || value == null ? "" : Number(value));
@@ -300,10 +298,11 @@ export function AmountDialog({ title, subtitle, value, monthly, fmt, onSave, onC
     </div>
   );
 }
+
 // ── Nabung versi HP ──
 export function SaveMobile({ people, activeIdx, monthLabels, curIdx, monthly, monthsOf, personTotal, updMonth, fmt }) {
-  const [open, setOpen] = useState(null); // orang yang bulan-bulannya lagi dibuka
-  const [amountEdit, setAmountEdit] = useState(null); // { i, k } yang lagi diisi
+  const [open, setOpen] = useState(null);
+  const [amountEdit, setAmountEdit] = useState(null); // { i, k }
   const inPeriod = curIdx >= 0 && curIdx < monthLabels.length;
   const monthName = (k) => `${monthLabels[k].short} '${monthLabels[k].year}`;
 
@@ -318,7 +317,7 @@ export function SaveMobile({ people, activeIdx, monthLabels, curIdx, monthly, mo
   const AmountText = ({ i, k }) => {
     const v = people[i].months[k];
     const st = state(v, k);
-    return <span className={`text-sm font-semibold tabular-nums text-right ${textTint[st]}`}>{num(v) > 0 ? fmt(v) : st === "missed" ? "Bolong" : "–"}</span>;
+    return <span className={`text-sm font-semibold tabular-nums text-right ${textTint[st]}`}>{num(v) > 0 ? fmt(v) : st === "missed" ? "Terlewat" : "–"}</span>;
   };
   const EditBtn = ({ i, k }) => {
     const has = num(people[i].months[k]) > 0;
@@ -351,7 +350,7 @@ export function SaveMobile({ people, activeIdx, monthLabels, curIdx, monthly, mo
       )}
 
       <div className="bg-white rounded-xl border border-slate-200">
-        <div className="px-4 pt-4 pb-2 text-sm font-semibold text-slate-700">Semua bulan</div>
+        <div className="px-4 pt-4 pb-2 text-sm font-semibold text-slate-700">Tabungan per anggota</div>
         <div className="divide-y divide-slate-100">
           {activeIdx.map((i) => {
             const p = people[i];
@@ -411,78 +410,6 @@ export function SaveMobile({ people, activeIdx, monthLabels, curIdx, monthly, mo
           onClose={() => setAmountEdit(null)}
         />
       )}
-    </div>
-  );
-}
-
-// ── Bawaan versi HP ──
-export function PackingMobile({ packing, setPacking, activeNames, meName }) {
-  const [filter, setFilter] = useState("all");
-  const [draft, setDraft] = useState("");
-  const upd = (id, f, v) => setPacking((ps) => ps.map((p) => (p.id === id ? { ...p, [f]: v } : p)));
-  const del = (id) => setPacking((ps) => ps.filter((p) => p.id !== id));
-  const add = () => {
-    const item = draft.trim();
-    if (!item) return;
-    setPacking((ps) => [...ps, { id: uid(), item, who: filter === "mine" && meName ? meName : "Everyone", done: false }]);
-    setDraft("");
-  };
-
-  const filters = [{ id: "all", label: "Semua" }, ...(meName ? [{ id: "mine", label: "Punyaku" }] : []), { id: "shared", label: "Bareng" }];
-  const list = packing.filter((p) => filter === "all" || (filter === "mine" ? p.who === meName : p.who === "Everyone")).sort((a, b) => Number(!!a.done) - Number(!!b.done));
-
-  return (
-    <div className="space-y-3">
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          add();
-        }}
-        className="flex gap-2"
-      >
-        <input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Tambah barang" className={field} />
-        <button type="submit" aria-label="Tambah" className="shrink-0 w-12 rounded-lg bg-sky-500 active:bg-sky-600 text-white flex items-center justify-center">
-          <Plus size={20} />
-        </button>
-      </form>
-
-      <div className="flex gap-2">
-        {filters.map((f) => (
-          <button key={f.id} onClick={() => setFilter(f.id)} className={`text-sm px-3.5 py-1.5 rounded-full border transition ${filter === f.id ? "bg-sky-500 border-sky-500 text-white" : "bg-white border-slate-200 text-slate-600"}`}>
-            {f.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="bg-white rounded-xl border border-slate-200 divide-y divide-slate-100">
-        {list.length === 0 && <div className="text-sm text-slate-400 text-center py-8">Kosong.</div>}
-        {list.map((r) => (
-          <div key={r.id} className="flex items-center gap-3 px-3 py-2">
-            <button
-              onClick={() => upd(r.id, "done", !r.done)}
-              aria-label={r.done ? "Belum" : "Udah"}
-              className={`w-7 h-7 shrink-0 rounded-lg border-2 flex items-center justify-center transition ${r.done ? "bg-sky-500 border-sky-500 text-white" : "border-slate-300"}`}
-            >
-              {r.done && <Check size={16} strokeWidth={3} />}
-            </button>
-            <div className="flex-1 min-w-0">
-              <input value={r.item} onChange={(e) => upd(r.id, "item", e.target.value)} placeholder="Barang" className={`w-full bg-transparent focus:outline-none py-0.5 ${r.done ? "line-through text-slate-400" : "text-slate-800"}`} />
-              <select value={r.who} onChange={(e) => upd(r.id, "who", e.target.value)} className="text-xs text-slate-400 bg-transparent -ml-0.5 focus:outline-none">
-                <option value="Everyone">Semua orang</option>
-                {activeNames.map((n) => (
-                  <option key={n} value={n}>
-                    {n}
-                  </option>
-                ))}
-                {r.who !== "Everyone" && !activeNames.includes(r.who) && <option value={r.who}>{r.who}</option>}
-              </select>
-            </div>
-            <button onClick={() => del(r.id)} aria-label="Hapus" className="p-2 -mr-1 rounded-lg text-slate-300 active:text-rose-500 active:bg-rose-50">
-              <Trash2 size={17} />
-            </button>
-          </div>
-        ))}
-      </div>
     </div>
   );
 }
