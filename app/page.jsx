@@ -1,32 +1,20 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Plus, Trash2, RotateCcw, MapPin, Calendar, PiggyBank, CalendarDays, Wallet, Luggage, Check, ExternalLink, Link2, ArrowRight, CheckCheck, Lightbulb, History as HistoryIcon } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Plus, Trash2, RotateCcw, MapPin, Calendar, PiggyBank, CalendarDays, Wallet, Luggage, Check, ExternalLink, Link2, ArrowRight, Lightbulb, History as HistoryIcon } from "lucide-react";
 import { useSharedTrip } from "./useSharedTrip";
 import IdeasTab from "./IdeasTab";
 import HistoryPanel from "./HistoryPanel";
+import MemberPage from "./MemberPage";
+import { CATS, CAT_TINT, NO_DECIMALS, FUND, num, isFund, normCat, settle, Avatar } from "./shared";
 
-const AVATAR = ["bg-rose-400", "bg-orange-400", "bg-amber-400", "bg-emerald-500", "bg-teal-500", "bg-sky-500", "bg-indigo-500", "bg-violet-500"];
 const DAY_TINT = ["bg-indigo-100 text-indigo-700", "bg-emerald-100 text-emerald-700", "bg-amber-100 text-amber-700", "bg-rose-100 text-rose-700", "bg-sky-100 text-sky-700", "bg-violet-100 text-violet-700"];
-const CATS = ["Stay", "Transport", "Food", "Activities", "Shopping", "Other"];
-const CAT_TINT = {
-  Stay: "bg-indigo-50 text-indigo-700",
-  Transport: "bg-sky-50 text-sky-700",
-  Food: "bg-amber-50 text-amber-700",
-  Activities: "bg-emerald-50 text-emerald-700",
-  Shopping: "bg-rose-50 text-rose-700",
-  Other: "bg-slate-100 text-slate-600",
-};
-const NO_DECIMALS = ["IDR", "JPY", "KRW", "VND"];
 const DEFAULT_MONTHS = 12;
 const MAX_MONTHS = 60;
-const FUND = -1; // "Paid by" value for expenses paid from the group fund
 
 const uid = () => Math.random().toString(36).slice(2, 9);
-const num = (v) => Number(v) || 0;
 const blankMonths = () => Array(DEFAULT_MONTHS).fill("");
 const isUrl = (s) => /^https?:\/\//i.test(String(s || "").trim());
-const isFund = (e) => e.paidBy === FUND;
 const thisMonth = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
@@ -50,12 +38,13 @@ const nextDate = (date) => {
   d.setDate(d.getDate() + 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 };
+const fmtDate = (ms) => (ms ? new Date(ms).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : "");
 const blankRow = () => ({ id: uid(), time: "", place: "", link: "", activity: "", price: "", notes: "" });
 
 const defaults = () => {
   const people = Array.from({ length: 8 }, (_, i) => ({ name: `Person ${i + 1}`, months: blankMonths() }));
   return {
-    trip: { name: "Group Trip", dest: "", start: "", end: "", saveStart: thisMonth(), saveEnd: addMonths(thisMonth(), DEFAULT_MONTHS - 1), monthly: "" },
+    trip: { name: "Group Trip", dest: "", start: "", end: "", saveStart: thisMonth(), saveEnd: addMonths(thisMonth(), DEFAULT_MONTHS - 1), monthly: "", settleMode: "separate" },
     currencies: [
       { id: "cur-0", code: "IDR", symbol: "Rp", rate: 1 },
       { id: "cur-1", code: "MYR", symbol: "RM", rate: 3800 },
@@ -70,6 +59,7 @@ const defaults = () => {
       { id: uid(), cat: "Transport", item: "Grab to hotel (car 1)", amount: "", cur: "MYR", paidBy: 0, split: [0, 1, 2, 3], settled: false },
       { id: uid(), cat: "Transport", item: "Grab to hotel (car 2)", amount: "", cur: "MYR", paidBy: 4, split: [4, 5, 6, 7], settled: false },
     ],
+    payments: [],
     packing: [
       { id: "pk-0", item: "Passport", who: "Everyone", done: false },
       { id: "pk-1", item: "Phone charger", who: "Everyone", done: false },
@@ -78,11 +68,6 @@ const defaults = () => {
     ideas: [],
     ideaCities: [],
   };
-};
-
-const normCat = (c) => {
-  const s = String(c || "").toLowerCase();
-  return CATS.find((x) => s.includes(x.toLowerCase().slice(0, 4))) || (s.includes("fun") ? "Activities" : "Other");
 };
 
 // Upgrade older saved data to the current format.
@@ -119,37 +104,13 @@ const migrate = (s) => {
     split: Array.isArray(e.split) ? e.split : all,
     settled: !!e.settled,
   }));
+  out.payments = Array.isArray(s.payments) ? s.payments : [];
   out.packing = (s.packing || d.packing).map((p, i) => ({ ...p, id: p.id || `pk-${i}` }));
   out.ideas = (Array.isArray(s.ideas) ? s.ideas : []).map((x) => {
     const { link, ...rest } = x;
     const links = Array.isArray(x.links) ? x.links : link ? [{ id: `${x.id}-l0`, url: link }] : [];
     return { ...rest, links, photos: Array.isArray(x.photos) ? x.photos : [], cover: x.cover || "" };
   });
-  return out;
-};
-
-// Minimal list of transfers to settle balances
-const settle = (bal, dec) => {
-  const eps = dec === 0 ? 0.5 : 0.005;
-  const cr = bal
-    .map((v, i) => ({ i, v }))
-    .filter((x) => x.v > eps)
-    .sort((a, b) => b.v - a.v);
-  const db = bal
-    .map((v, i) => ({ i, v: -v }))
-    .filter((x) => x.v > eps)
-    .sort((a, b) => b.v - a.v);
-  const out = [];
-  let x = 0,
-    y = 0;
-  while (x < db.length && y < cr.length) {
-    const m = Math.min(db[x].v, cr[y].v);
-    out.push({ from: db[x].i, to: cr[y].i, amt: m });
-    db[x].v -= m;
-    cr[y].v -= m;
-    if (db[x].v <= eps) x++;
-    if (cr[y].v <= eps) y++;
-  }
   return out;
 };
 
@@ -178,10 +139,6 @@ const Stat = ({ label, value, accent, sub }) => (
     <div className="text-xl font-semibold text-slate-800 mt-1">{value}</div>
     {sub && <div className="text-xs text-slate-400 mt-0.5">{sub}</div>}
   </div>
-);
-
-const Avatar = ({ name, i, size = "w-7 h-7 text-xs", className = "" }) => (
-  <span className={`inline-flex ${size} shrink-0 rounded-full ${AVATAR[i % 8]} text-white font-semibold items-center justify-center ${className}`}>{(name || "?").trim().charAt(0).toUpperCase() || "?"}</span>
 );
 
 const TH = ({ children, className = "" }) => <th className={`px-3 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide ${className}`}>{children}</th>;
@@ -217,21 +174,43 @@ export default function App() {
   const { trip: data, update: setData, status, ready } = useSharedTrip(defaults, migrate);
   const [tab, setTab] = useState("itinerary");
   const [linkEdit, setLinkEdit] = useState(null);
-  const [settleMode, setSettleMode] = useState("separate");
   const [showHistory, setShowHistory] = useState(false);
+  const [memberIdx, setMemberIdx] = useState(null);
+  const memberOpenedHere = useRef(false);
 
-  // Shared links to an idea (#idea-…) open the Ideas tab
+  // Links: #idea-… opens the Ideas tab, #member-N opens that person's page
   useEffect(() => {
     const check = () => {
-      if (window.location.hash.startsWith("#idea-")) setTab("ideas");
+      const h = window.location.hash;
+      if (h.startsWith("#idea-")) setTab("ideas");
+      const m = h.match(/^#member-(\d+)$/);
+      setMemberIdx(m ? Number(m[1]) : null);
     };
     check();
     window.addEventListener("hashchange", check);
     return () => window.removeEventListener("hashchange", check);
   }, []);
+  useEffect(() => {
+    if (memberIdx !== null) window.scrollTo({ top: 0 });
+  }, [memberIdx]);
+  const openMember = (i) => {
+    memberOpenedHere.current = true;
+    window.location.hash = `member-${i}`;
+  };
+  const closeMember = () => {
+    if (memberOpenedHere.current) {
+      memberOpenedHere.current = false;
+      window.history.back();
+    } else {
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+      setMemberIdx(null);
+    }
+  };
 
   const { trip, currencies, people, days, expenses, packing } = data;
+  const payments = data.payments || [];
   const home = currencies[0];
+  const viewingMember = memberIdx !== null && memberIdx < people.length;
 
   // ── generic updaters ──
   const setTrip = (f, v) => setData((d) => ({ ...d, trip: { ...d.trip, [f]: v } }));
@@ -297,9 +276,22 @@ export default function App() {
       expenses: d.expenses.map((e, j) => (j !== ei ? e : { ...e, split: e.split.includes(pi) ? e.split.filter((x) => x !== pi) : [...e.split, pi].sort((a, b) => a - b) })),
     }));
   const setSplitAll = (ei, all) => upd("expenses", ei, "split", all ? people.map((_, i) => i) : []);
-  const settleGroup = (code) => setData((d) => ({ ...d, expenses: d.expenses.map((e) => (!isFund(e) && !e.settled && (code === "__ALL__" || e.cur === code) ? { ...e, settled: true } : e)) }));
 
-  // Person-to-person balances. Fund-paid expenses are left out: nobody owes anybody for those.
+  // ── payments (paying each other back) ──
+  const settleMode = trip.settleMode || "separate";
+  const setSettleMode = (v) => setTrip("settleMode", v);
+  const addPayment = (t, g) => {
+    const dec = decOf(g.fmtCode);
+    const amount = dec === 0 ? Math.round(t.amt) : Math.round(t.amt * 100) / 100;
+    if (!confirm(`Mark that ${people[t.from].name} paid ${people[t.to].name} ${fmt(amount, g.fmtCode)}?`)) return;
+    setData((d) => ({ ...d, payments: [...(d.payments || []), { id: uid(), from: t.from, to: t.to, amount, cur: g.fmtCode, at: Date.now() }] }));
+  };
+  const delPayment = (id) => {
+    if (confirm("Undo this payment? It'll show as unpaid again.")) setData((d) => ({ ...d, payments: (d.payments || []).filter((x) => x.id !== id) }));
+  };
+
+  // Person-to-person balances: personal expenses minus payments already made.
+  // Fund-paid expenses are left out: nobody owes anybody for those.
   const balances = (code) => {
     const b = people.map(() => 0);
     expenses.forEach((e) => {
@@ -311,6 +303,14 @@ export default function App() {
       else if (e.cur !== code) return;
       b[e.paidBy] += a;
       split.forEach((i) => (b[i] -= a / split.length));
+    });
+    payments.forEach((x) => {
+      if (x.from >= people.length || x.to >= people.length) return;
+      let a = num(x.amount);
+      if (code === "__ALL__") a = a * rateOf(x.cur);
+      else if (x.cur !== code) return;
+      b[x.from] += a;
+      b[x.to] -= a;
     });
     return b;
   };
@@ -362,7 +362,13 @@ export default function App() {
   const settleGroups =
     settleMode === "combined"
       ? [{ code: "__ALL__", label: `All currencies → ${home.code}`, fmtCode: home.code }]
-      : currencies.filter((c) => unsettled.some((e) => e.cur === c.code)).map((c) => ({ code: c.code, label: c.code, fmtCode: c.code }));
+      : currencies.filter((c) => unsettled.some((e) => e.cur === c.code) || payments.some((x) => x.cur === c.code)).map((c) => ({ code: c.code, label: c.code, fmtCode: c.code }));
+  const settleData = settleGroups.map((g) => {
+    const bal = balances(g.code);
+    return { ...g, bal, tr: settle(bal, decOf(g.fmtCode)) };
+  });
+  const allSettled = settleData.every((g) => g.tr.length === 0);
+  const stillToPay = settleData.reduce((s, g) => s + g.tr.reduce((a, t) => a + t.amt * rateOf(g.fmtCode), 0), 0);
 
   // ── group fund (all in home currency, same as the Save tab) ──
   const fundExpenses = expenses.filter((e) => isFund(e) && num(e.amount) > 0);
@@ -418,12 +424,12 @@ export default function App() {
             <div className="flex items-center mt-4">
               <div className="flex -space-x-1.5">
                 {people.map((p, i) => (
-                  <span key={i} title={p.name} className="ring-2 ring-white rounded-full">
+                  <button key={i} onClick={() => openMember(i)} title={`Open ${p.name}'s page`} className={`rounded-full ring-2 hover:z-10 hover:scale-110 transition ${memberIdx === i ? "ring-indigo-400 z-10" : "ring-white"}`}>
                     <Avatar name={p.name} i={i} />
-                  </span>
+                  </button>
                 ))}
               </div>
-              <span className="text-sm text-slate-500 ml-3">{people.length} travelers</span>
+              <span className="text-sm text-slate-500 ml-3">{people.length} travelers · tap a face to see their page</span>
             </div>
           </div>
         </div>
@@ -434,8 +440,11 @@ export default function App() {
             {tabs.map(({ id, label, Icon, on }) => (
               <button
                 key={id}
-                onClick={() => setTab(id)}
-                className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition ${tab === id ? on : "border-transparent text-slate-500 hover:text-slate-700"}`}
+                onClick={() => {
+                  setTab(id);
+                  if (viewingMember) closeMember();
+                }}
+                className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition ${tab === id && !viewingMember ? on : "border-transparent text-slate-500 hover:text-slate-700"}`}
               >
                 <Icon size={16} /> {label}
               </button>
@@ -455,8 +464,34 @@ export default function App() {
         <div className="mt-5">
           {showHistory && <HistoryPanel onRestore={restore} onClose={() => setShowHistory(false)} />}
 
+          {/* ═════════ MEMBER PAGE ═════════ */}
+          {viewingMember && (
+            <MemberPage
+              index={memberIdx}
+              people={people}
+              expenses={expenses}
+              packing={packing}
+              payments={payments}
+              monthLabels={monthLabels}
+              curIdx={curIdx}
+              monthly={monthly}
+              monthsOf={monthsOf}
+              personTotal={personTotal}
+              fundShare={fundShare}
+              fmt={fmt}
+              rateOf={rateOf}
+              homeEps={homeEps}
+              settleData={settleData}
+              onMarkPaid={addPayment}
+              onDeletePayment={delPayment}
+              onRename={(v) => upd("people", memberIdx, "name", v)}
+              onOpenMember={openMember}
+              onBack={closeMember}
+            />
+          )}
+
           {/* ═════════ SAVE ═════════ */}
-          {tab === "save" && (
+          {!viewingMember && tab === "save" && (
             <div className="space-y-4">
               <div className="bg-white rounded-xl border border-slate-200 p-4 flex flex-wrap gap-x-6 gap-y-3 items-center">
                 <label className="flex items-center gap-2 text-sm">
@@ -533,7 +568,9 @@ export default function App() {
                       <tr key={i}>
                         <td className="px-3 py-1 sticky left-0 bg-white z-10 border-r border-slate-100">
                           <div className="flex items-center gap-2">
-                            <Avatar name={p.name} i={i} />
+                            <button onClick={() => openMember(i)} title={`Open ${p.name}'s page`} className="rounded-full hover:scale-110 transition">
+                              <Avatar name={p.name} i={i} />
+                            </button>
                             <Cell value={p.name} onChange={(v) => upd("people", i, "name", v)} className="font-medium w-28" />
                           </div>
                         </td>
@@ -583,10 +620,10 @@ export default function App() {
           )}
 
           {/* ═════════ IDEAS ═════════ */}
-          {tab === "ideas" && <IdeasTab data={data} setData={setData} />}
+          {!viewingMember && tab === "ideas" && <IdeasTab data={data} setData={setData} />}
 
           {/* ═════════ ITINERARY ═════════ */}
-          {tab === "itinerary" && (
+          {!viewingMember && tab === "itinerary" && (
             <div>
               <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
                 <table className="w-full min-w-max border-collapse">
@@ -694,7 +731,7 @@ export default function App() {
           )}
 
           {/* ═════════ BUDGET & SPLIT ═════════ */}
-          {tab === "budget" && (
+          {!viewingMember && tab === "budget" && (
             <div className="space-y-5">
               {/* Currencies */}
               <div className="bg-white rounded-xl border border-slate-200 p-4">
@@ -729,7 +766,7 @@ export default function App() {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 <Stat label={`Total spent (in ${home.code})`} value={fmt(totalHome)} accent="bg-amber-400" sub={perCur.map((x) => fmt(x.total, x.code)).join(" + ") || "No expenses yet"} />
                 <Stat label="Per person (avg)" value={fmt(totalHome / people.length)} accent="bg-orange-400" />
-                <Stat label="Unsettled (paid personally)" value={unsettled.length} accent="bg-rose-400" sub={`${fundExpenses.length} paid from the group fund`} />
+                <Stat label="Still to pay back" value={allSettled ? "Nothing" : fmt(stillToPay)} accent="bg-rose-400" sub={`${payments.length} payment${payments.length === 1 ? "" : "s"} made`} />
                 <Stat label="Savings vs cost" value={fmt(totalSaved - totalHome)} accent={totalSaved >= totalHome ? "bg-emerald-500" : "bg-rose-400"} sub={totalSaved >= totalHome ? "Savings cover the trip" : "Short of trip cost"} />
               </div>
 
@@ -743,7 +780,6 @@ export default function App() {
                       <TH>Amount</TH>
                       <TH>Paid by</TH>
                       <TH>Split between</TH>
-                      <TH className="text-center">Settled</TH>
                       <TH></TH>
                     </tr>
                   </thead>
@@ -753,7 +789,7 @@ export default function App() {
                       const n = e.split.filter((x) => x < people.length).length;
                       const fund = isFund(e);
                       return (
-                        <tr key={e.id} className={`hover:bg-slate-50/60 ${!fund && e.settled ? "opacity-50" : ""}`}>
+                        <tr key={e.id} title={e.settled ? "Settled earlier" : undefined} className={`hover:bg-slate-50/60 ${!fund && e.settled ? "opacity-50" : ""}`}>
                           <td className="px-3 py-1.5">
                             <Select value={cat} onChange={(v) => upd("expenses", i, "cat", v)} className={`font-medium ${CAT_TINT[cat]}`}>
                               {CATS.map((c) => (
@@ -798,20 +834,6 @@ export default function App() {
                               </button>
                               <span className="text-xs text-slate-500 whitespace-nowrap">{n ? `${fmt(num(e.amount) / n, e.cur)} each` : "no one"}</span>
                             </div>
-                          </td>
-                          <td className="px-3 text-center">
-                            {fund ? (
-                              <span title="Paid from the group fund, so there's nothing to settle" className="text-xs text-slate-300">
-                                —
-                              </span>
-                            ) : (
-                              <button
-                                onClick={() => upd("expenses", i, "settled", !e.settled)}
-                                className={`w-5 h-5 rounded border-2 inline-flex items-center justify-center transition ${e.settled ? "bg-emerald-500 border-emerald-500 text-white" : "border-slate-300 hover:border-emerald-400"}`}
-                              >
-                                {e.settled && <Check size={13} strokeWidth={3} />}
-                              </button>
-                            )}
                           </td>
                           <td className="px-2">
                             <Del onClick={() => del("expenses", i)} />
@@ -882,9 +904,9 @@ export default function App() {
                         return (
                           <tr key={i}>
                             <td className="py-2">
-                              <div className="flex items-center gap-2">
+                              <button onClick={() => openMember(i)} className="flex items-center gap-2 hover:text-indigo-600">
                                 <Avatar name={p.name} i={i} size="w-6 h-6 text-xs" /> <span className="font-medium">{p.name}</span>
-                              </div>
+                              </button>
                             </td>
                             <td className="px-3 text-right">{fmt(saved)}</td>
                             <td className="px-3 text-right text-slate-500">{fmt(fundShare[i])}</td>
@@ -922,47 +944,59 @@ export default function App() {
                   </div>
                 </div>
 
-                {unsettled.length === 0 ? (
+                {allSettled ? (
                   <div className="text-center text-sm text-slate-400 py-6">Everyone is settled up ✓</div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {settleGroups.map((g) => {
-                      const bal = balances(g.code);
-                      const tr = settle(bal, decOf(g.fmtCode));
-                      return (
+                    {settleData
+                      .filter((g) => g.tr.length > 0)
+                      .map((g) => (
                         <div key={g.code} className="rounded-lg border border-slate-200 overflow-hidden">
-                          <div className="flex items-center justify-between bg-amber-50 px-3 py-2">
+                          <div className="bg-amber-50 px-3 py-2">
                             <span className="text-sm font-semibold text-amber-800">{g.label}</span>
-                            <button onClick={() => settleGroup(g.code)} className="inline-flex items-center gap-1 text-xs text-amber-700 hover:bg-amber-100 px-2 py-1 rounded-md">
-                              <CheckCheck size={14} /> Mark all settled
-                            </button>
                           </div>
                           <div className="divide-y divide-slate-100">
-                            {tr.length === 0 && <div className="text-sm text-slate-400 px-3 py-3">Nothing to pay back.</div>}
-                            {tr.map((t, k) => (
-                              <div key={k} className="flex items-center gap-2 px-3 py-2.5 text-sm">
-                                <Avatar name={people[t.from].name} i={t.from} size="w-6 h-6 text-xs" />
-                                <span className="font-medium">{people[t.from].name}</span>
+                            {g.tr.map((t, k) => (
+                              <div key={k} className="flex flex-wrap items-center gap-2 px-3 py-2.5 text-sm">
+                                <button onClick={() => openMember(t.from)} className="flex items-center gap-2 hover:text-indigo-600">
+                                  <Avatar name={people[t.from].name} i={t.from} size="w-6 h-6 text-xs" />
+                                  <span className="font-medium">{people[t.from].name}</span>
+                                </button>
                                 <ArrowRight size={14} className="text-slate-400" />
-                                <Avatar name={people[t.to].name} i={t.to} size="w-6 h-6 text-xs" />
-                                <span className="font-medium">{people[t.to].name}</span>
+                                <button onClick={() => openMember(t.to)} className="flex items-center gap-2 hover:text-indigo-600">
+                                  <Avatar name={people[t.to].name} i={t.to} size="w-6 h-6 text-xs" />
+                                  <span className="font-medium">{people[t.to].name}</span>
+                                </button>
                                 <span className="ml-auto font-semibold text-rose-600">{fmt(t.amt, g.fmtCode)}</span>
+                                <button onClick={() => addPayment(t, g)} className="text-xs font-medium text-emerald-700 border border-emerald-200 hover:bg-emerald-50 px-2.5 py-1 rounded-md">
+                                  Mark paid
+                                </button>
                               </div>
                             ))}
                           </div>
-                          <div className="flex flex-wrap gap-1.5 px-3 py-2 bg-slate-50 border-t border-slate-100">
-                            {bal.map((v, j) =>
-                              Math.abs(v) < (decOf(g.fmtCode) === 0 ? 0.5 : 0.005) ? null : (
-                                <span key={j} className={`text-xs px-2 py-0.5 rounded-full ${v > 0 ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-600"}`}>
-                                  {people[j].name} {v > 0 ? "+" : "−"}
-                                  {fmt(Math.abs(v), g.fmtCode)}
-                                </span>
-                              ),
-                            )}
-                          </div>
                         </div>
-                      );
-                    })}
+                      ))}
+                  </div>
+                )}
+
+                {payments.length > 0 && (
+                  <div className="mt-5 border-t border-slate-100 pt-3">
+                    <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Payments made</div>
+                    <div className="divide-y divide-slate-100">
+                      {[...payments]
+                        .sort((a, b) => (b.at || 0) - (a.at || 0))
+                        .map((x) => (
+                          <div key={x.id} className="flex items-center gap-2 py-2 text-sm">
+                            <Check size={14} className="text-emerald-500 shrink-0" />
+                            <span className="font-medium">{people[x.from]?.name || "Someone"}</span>
+                            <span className="text-slate-400">paid</span>
+                            <span className="font-medium">{people[x.to]?.name || "someone"}</span>
+                            <span className="text-xs text-slate-400">{fmtDate(x.at)}</span>
+                            <span className="ml-auto font-semibold text-emerald-700">{fmt(x.amount, x.cur)}</span>
+                            <Del onClick={() => delPayment(x.id)} title="Undo this payment" />
+                          </div>
+                        ))}
+                    </div>
                   </div>
                 )}
               </div>
@@ -970,7 +1004,7 @@ export default function App() {
           )}
 
           {/* ═════════ PACKING ═════════ */}
-          {tab === "packing" && (
+          {!viewingMember && tab === "packing" && (
             <div className="space-y-4">
               <div className="bg-white rounded-xl border border-slate-200 p-4">
                 <div className="flex justify-between text-sm mb-2">
