@@ -470,9 +470,6 @@ export default function App() {
             <button onClick={() => setShowHistory((v) => !v)} title="Riwayat" className={`p-2 md:p-1.5 rounded-md hover:text-slate-600 hover:bg-slate-100 ${showHistory ? "text-slate-700 bg-slate-100" : "text-slate-400"}`}>
               <HistoryIcon size={16} />
             </button>
-            <button onClick={reset} title="Reset" className="p-2 md:p-1.5 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100">
-              <RotateCcw size={16} />
-            </button>
           </div>
         </div>
 
