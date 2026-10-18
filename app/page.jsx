@@ -815,7 +815,7 @@ export default function App() {
           )}
 
           {/* ═════════ BAWAAN ═════════ */}
-          {!viewingMember && tab === "packing" && <PackingTab people={people} activeIdx={activeIdx} isActive={isActive} packing={packing} setPacking={setPacking} meIdx={meIdx} setMe={setMe} />}
+          {!viewingMember && tab === "packing" && <PackingTab people={people} activeIdx={activeIdx} isActive={isActive} packing={packing} packCats={data.packCats} setData={setData} meIdx={meIdx} setMe={setMe} />}
         </div>
       </div>
 
