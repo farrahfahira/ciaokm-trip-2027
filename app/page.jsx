@@ -60,11 +60,8 @@ const defaults = () => {
       { id: uid(), label: "", date: "", rows: [blankRow()] },
     ],
     expenses: [],
-    packing: [
-      { id: "pk-0", item: "Paspor", type: "personal", who: "all", cat: "docs", done: {} },
-      { id: "pk-1", item: "Charger HP", type: "personal", who: "all", cat: "electronics", done: {} },
-      { id: "pk-2", item: "Power bank", type: "shared", who: [0], cat: "electronics", done: {} },
-    ],
+    packing: [{ id: "pk-2", item: "Power bank", type: "shared", who: [0], cat: "", done: {} }],
+    packCats: { shared: [], personal: {} },
     ideas: [],
     ideaCities: [],
   };
@@ -127,25 +124,46 @@ const migrate = (s) => {
   delete out.payments;
   delete out.trip.settleMode;
   // Bawaan: format lama (who = nama / "Everyone") → Pribadi/Bersama, terhubung ke orangnya
-  out.packing = (s.packing || d.packing).map((p, i) => {
-    const id = p.id || `pk-${i}`;
-    if (p.type) {
-      return {
-        ...p,
-        id,
-        cat: PACK_KEYS.includes(p.cat) ? p.cat : "",
-        who: p.who === "all" ? "all" : Array.isArray(p.who) ? p.who : [],
-        done: p.done && typeof p.done === "object" ? p.done : {},
-      };
-    }
-    const base = { id, item: p.item || "", cat: "", done: {} };
-    if (!p.who || p.who === "Everyone") return { ...base, type: "personal", who: "all" };
-    let idx = out.people.findIndex((x) => x.name === p.who);
+  // Bawaan → Pribadi (punya satu orang) atau Bersama (satu buat semua)
+  const OLD_CATS = { docs: "Dokumen", clothes: "Pakaian", toiletries: "Perlengkapan mandi", electronics: "Elektronik", meds: "Obat", food: "Makanan" };
+  const pc = s.packCats && typeof s.packCats === "object" ? s.packCats : {};
+  out.packCats = {
+    shared: Array.isArray(pc.shared) ? [...pc.shared] : [],
+    personal: pc.personal && typeof pc.personal === "object" ? { ...pc.personal } : {},
+  };
+  const activeNow = out.people.map((_, i) => i).filter((i) => !out.people[i].removed);
+  const findPerson = (name) => {
+    let idx = out.people.findIndex((x) => x.name === name);
     if (idx < 0) {
-      const m = String(p.who).match(/^(?:Person|Orang)\s+(\d+)$/i);
+      const m = String(name).match(/^(?:Person|Orang)\s+(\d+)$/i);
       if (m && Number(m[1]) - 1 < out.people.length) idx = Number(m[1]) - 1;
     }
-    return { ...base, type: "shared", who: idx >= 0 ? [idx] : [], done: idx >= 0 && p.done === true ? { [idx]: true } : {} };
+    return idx;
+  };
+  const sharedCat = (key) => {
+    if (!OLD_CATS[key]) return key || "";
+    const cid = `sc-${key}`;
+    if (!out.packCats.shared.some((c) => c.id === cid)) out.packCats.shared.push({ id: cid, name: OLD_CATS[key] });
+    return cid;
+  };
+  // Barang Pribadi buat banyak orang → dipecah jadi satu per orang
+  const perPerson = (p, list, doneOf) => list.map((j) => ({ id: `${p.id}-${j}`, item: p.item || "", type: "personal", owner: j, cat: "", done: doneOf(j) }));
+  out.packing = (s.packing || d.packing).flatMap((raw, i) => {
+    const p = { ...raw, id: raw.id || `pk-${i}` };
+    if (p.type === "personal" && typeof p.owner === "number") {
+      return [{ id: p.id, item: p.item || "", type: "personal", owner: p.owner, cat: OLD_CATS[p.cat] ? "" : p.cat || "", done: !!p.done }];
+    }
+    if (p.type === "personal") {
+      const list = p.who === "all" ? activeNow : Array.isArray(p.who) ? p.who : [];
+      return perPerson(p, list, (j) => !!(p.done && p.done[j]));
+    }
+    if (p.type === "shared") {
+      return [{ id: p.id, item: p.item || "", type: "shared", who: Array.isArray(p.who) ? p.who : [], cat: sharedCat(p.cat), done: p.done && typeof p.done === "object" ? p.done : {} }];
+    }
+    // format paling lama: who = nama / "Everyone"
+    if (!p.who || p.who === "Everyone") return perPerson(p, activeNow, () => false);
+    const idx = findPerson(p.who);
+    return [{ id: p.id, item: p.item || "", type: "shared", who: idx >= 0 ? [idx] : [], cat: "", done: idx >= 0 && p.done === true ? { [idx]: true } : {} }];
   });
   out.ideas = (Array.isArray(s.ideas) ? s.ideas : []).map((x) => {
     const { link, ...rest } = x;

@@ -92,7 +92,8 @@ export default function MemberPage({ index, people, expenses, packing, monthLabe
   };
 
   // ── bawaan ──
-  const bringing = packing.filter((x) => (x.who === "all" ? !p.removed : Array.isArray(x.who) && x.who.includes(index)));
+  const bringingShared = packing.filter((x) => x.type === "shared" && Array.isArray(x.who) && x.who.includes(index));
+  const personalItems = packing.filter((x) => x.type !== "shared" && x.owner === index);
 
   const PersonBtn = ({ i }) => (
     <button onClick={() => onOpenMember(i)} className="inline-flex items-center gap-2 min-w-0 hover:text-indigo-600">
@@ -298,18 +299,27 @@ export default function MemberPage({ index, people, expenses, packing, monthLabe
 
       {/* Bawaan */}
       <Section title="Bawaan">
-        {bringing.length === 0 ? (
+        {bringingShared.length === 0 && personalItems.length === 0 ? (
           <div className="text-sm text-slate-400">Belum ada.</div>
         ) : (
-          <div className="flex flex-wrap gap-2">
-            {bringing.map((x) => {
-              const done = !!(x.done && x.done[index]);
-              return (
-                <span key={x.id} className={`text-sm px-3 py-1 rounded-full ${done ? "bg-sky-50 text-sky-700 line-through" : "bg-slate-100 text-slate-700"}`}>
-                  {x.item || "Tanpa nama"}
-                </span>
-              );
-            })}
+          <div className="space-y-2">
+            {bringingShared.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {bringingShared.map((x) => {
+                  const done = !!(x.done && x.done[index]);
+                  return (
+                    <span key={x.id} className={`text-sm px-3 py-1 rounded-full ${done ? "bg-sky-50 text-sky-700 line-through" : "bg-slate-100 text-slate-700"}`}>
+                      {x.item || "Tanpa nama"}
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+            {personalItems.length > 0 && (
+              <div className="text-sm text-slate-500">
+                {personalItems.filter((x) => x.done).length} dari {personalItems.length} barang pribadi udah masuk tas
+              </div>
+            )}
           </div>
         )}
       </Section>
