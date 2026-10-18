@@ -1,14 +1,16 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Plus, Trash2, RotateCcw, MapPin, Calendar, PiggyBank, CalendarDays, Wallet, Luggage, Check, ExternalLink, Link2, ArrowRight, Lightbulb, Users, History as HistoryIcon } from "lucide-react";
+import { Plus, Trash2, RotateCcw, MapPin, Calendar, PiggyBank, CalendarDays, Wallet, Luggage, Check, ExternalLink, Link2, Lightbulb, Users, History as HistoryIcon } from "lucide-react";
 import { useSharedTrip } from "./useSharedTrip";
 import IdeasTab from "./IdeasTab";
 import HistoryPanel from "./HistoryPanel";
 import MemberPage from "./MemberPage";
 import ManagePanel from "./ManagePanel";
-import { CATS, CAT_TINT, NO_DECIMALS, FUND, num, isFund, normCat, settle, Avatar } from "./shared";
+import BudgetTab from "./BudgetTab";
+import { NO_DECIMALS, FUND, num, isFund, normCat, Avatar } from "./shared";
 
+const ME_KEY = "trip-planner-me";
 const DAY_TINT = ["bg-indigo-100 text-indigo-700", "bg-emerald-100 text-emerald-700", "bg-amber-100 text-amber-700", "bg-rose-100 text-rose-700", "bg-sky-100 text-sky-700", "bg-violet-100 text-violet-700"];
 const DEFAULT_MONTHS = 12;
 const MAX_MONTHS = 60;
@@ -39,51 +41,44 @@ const nextDate = (date) => {
   d.setDate(d.getDate() + 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 };
-const fmtDate = (ms) => (ms ? new Date(ms).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : "");
 const blankRow = () => ({ id: uid(), time: "", place: "", link: "", activity: "", price: "", notes: "" });
 
 const defaults = () => {
-  const people = Array.from({ length: 8 }, (_, i) => ({ id: `p-${i}`, name: `Person ${i + 1}`, months: blankMonths(), photo: "" }));
+  const people = Array.from({ length: 8 }, (_, i) => ({ id: `p-${i}`, name: `Orang ${i + 1}`, months: blankMonths(), photo: "" }));
   return {
-    trip: { name: "Group Trip", dest: "", start: "", end: "", saveStart: thisMonth(), saveEnd: addMonths(thisMonth(), DEFAULT_MONTHS - 1), monthly: "", settleMode: "separate" },
+    trip: { name: "Trip Bareng", dest: "", start: "", end: "", saveStart: thisMonth(), saveEnd: addMonths(thisMonth(), DEFAULT_MONTHS - 1), monthly: "" },
     currencies: [
       { id: "cur-0", code: "IDR", symbol: "Rp", rate: 1 },
       { id: "cur-1", code: "MYR", symbol: "RM", rate: 3800 },
     ],
     people,
     days: [
-      { id: uid(), label: "Arrival", date: "", rows: [{ ...blankRow(), time: "11.00 - 13.30", place: "Flight", activity: "Travel" }, blankRow()] },
+      { id: uid(), label: "Kedatangan", date: "", rows: [{ ...blankRow(), time: "11.00 - 13.30", place: "Pesawat", activity: "Perjalanan" }, blankRow()] },
       { id: uid(), label: "", date: "", rows: [blankRow()] },
     ],
-    expenses: [
-      { id: uid(), cat: "Stay", item: "Accommodation", amount: "", cur: "MYR", paidBy: 0, split: people.map((_, i) => i), settled: false },
-      { id: uid(), cat: "Transport", item: "Grab to hotel (car 1)", amount: "", cur: "MYR", paidBy: 0, split: [0, 1, 2, 3], settled: false },
-      { id: uid(), cat: "Transport", item: "Grab to hotel (car 2)", amount: "", cur: "MYR", paidBy: 4, split: [4, 5, 6, 7], settled: false },
-    ],
-    payments: [],
+    expenses: [],
     packing: [
-      { id: "pk-0", item: "Passport", who: "Everyone", done: false },
-      { id: "pk-1", item: "Phone charger", who: "Everyone", done: false },
-      { id: "pk-2", item: "Power bank", who: "Person 1", done: false },
+      { id: "pk-0", item: "Paspor", who: "Everyone", done: false },
+      { id: "pk-1", item: "Charger HP", who: "Everyone", done: false },
+      { id: "pk-2", item: "Power bank", who: "Orang 1", done: false },
     ],
     ideas: [],
     ideaCities: [],
   };
 };
 
-// Upgrade older saved data to the current format.
-// Missing ids get predictable values so every friend's browser upgrades the same way.
+// Ubah data lama ke format sekarang.
+// ID yang belum ada dibikin tetap, jadi semua HP hasilnya sama.
 const migrate = (s) => {
   const d = defaults();
   const t = s.trip || {};
   const out = { ...d, ...s };
   out.trip = { ...d.trip, ...t, saveEnd: t.saveEnd || addMonths(t.saveStart || d.trip.saveStart, DEFAULT_MONTHS - 1) };
   out.currencies = (Array.isArray(s.currencies) && s.currencies.length ? s.currencies : d.currencies).map((c, i) => ({ ...c, id: c.id || `cur-${i}` }));
-  // Keep every field on a person (photo, removed, …), only fill in what's missing
   out.people = (s.people || d.people).map((p, i) => ({
     ...p,
     id: p.id || `p-${i}`,
-    name: p.name ?? `Person ${i + 1}`,
+    name: p.name ?? `Orang ${i + 1}`,
     months: Array.isArray(p.months) ? p.months : [num(p.saved) || ""],
   }));
   if (!Array.isArray(s.days)) {
@@ -107,8 +102,27 @@ const migrate = (s) => {
     paidBy: num(e.paidBy),
     split: Array.isArray(e.split) ? e.split : all,
     settled: !!e.settled,
+    paid: e.paid && typeof e.paid === "object" ? { ...e.paid } : {},
   }));
-  out.payments = Array.isArray(s.payments) ? s.payments : [];
+  // Pembayaran dari sistem lama ("Mark paid") → tandai lunas pengeluaran yang cocok, mulai dari yang paling lama
+  const rate = (code) => {
+    if (code === out.currencies[0].code) return 1;
+    const c = out.currencies.find((x) => x.code === code);
+    return num(c && c.rate);
+  };
+  (Array.isArray(s.payments) ? s.payments : []).forEach((pay) => {
+    let left = num(pay.amount) * rate(pay.cur);
+    out.expenses.forEach((e) => {
+      if (left <= 0 || e.paidBy !== pay.to || e.paidBy === FUND || e.settled) return;
+      if (pay.from === e.paidBy || !e.split.includes(pay.from) || e.paid[pay.from]) return;
+      const share = (num(e.amount) * rate(e.cur)) / e.split.length;
+      if (share <= 0 || share > left * 1.001 + 0.01) return;
+      e.paid[pay.from] = { by: null, at: pay.at || null };
+      left -= share;
+    });
+  });
+  delete out.payments;
+  delete out.trip.settleMode;
   out.packing = (s.packing || d.packing).map((p, i) => ({ ...p, id: p.id || `pk-${i}` }));
   out.ideas = (Array.isArray(s.ideas) ? s.ideas : []).map((x) => {
     const { link, ...rest } = x;
@@ -153,7 +167,7 @@ const Btn = ({ onClick, children, color }) => (
   </button>
 );
 
-const Del = ({ onClick, title = "Delete" }) => (
+const Del = ({ onClick, title = "Hapus" }) => (
   <button onClick={onClick} title={title} className="p-1.5 rounded-md text-slate-300 hover:text-rose-500 hover:bg-rose-50 transition">
     <Trash2 size={15} />
   </button>
@@ -167,89 +181,115 @@ const Select = ({ value, onChange, children, className = "" }) => (
 
 const STATUS_TEXT = {
   loading: "",
-  saving: "Saving…",
-  saved: "Saved · shared with everyone",
-  updated: "Updated with friends' changes ✓",
-  error: "Couldn't save · retrying…",
+  saving: "Menyimpan…",
+  saved: "Tersimpan",
+  updated: "Diperbarui",
+  error: "Belum tersimpan, nyoba lagi",
 };
 
 export default function App() {
-  // ── Shared storage: everyone with the link sees & edits the same data ──
+  // ── Data bareng: semua yang punya link lihat & ubah data yang sama ──
   const { trip: data, update: setData, status, ready } = useSharedTrip(defaults, migrate);
   const [tab, setTab] = useState("itinerary");
   const [linkEdit, setLinkEdit] = useState(null);
   const [showHistory, setShowHistory] = useState(false);
   const [showManage, setShowManage] = useState(false);
   const [memberIdx, setMemberIdx] = useState(null);
-  const memberOpenedHere = useRef(false);
+  const [expenseId, setExpenseId] = useState(null);
+  const [meIdx, setMeIdx] = useState(null);
+  const hashDepth = useRef(0);
 
-  // Links: #idea-… opens the Ideas tab, #member-N opens that person's page
+  // Link: #idea-… buka tab Ide, #member-N buka halaman anggota, #expense-… buka halaman pengeluaran
   useEffect(() => {
     const check = () => {
       const h = window.location.hash;
+      if (!h) hashDepth.current = 0;
       if (h.startsWith("#idea-")) setTab("ideas");
       const m = h.match(/^#member-(\d+)$/);
       setMemberIdx(m ? Number(m[1]) : null);
+      const ex = h.match(/^#expense-(.+)$/);
+      setExpenseId(ex ? ex[1] : null);
+      if (ex) setTab("budget");
     };
     check();
     window.addEventListener("hashchange", check);
     return () => window.removeEventListener("hashchange", check);
   }, []);
   useEffect(() => {
-    if (memberIdx !== null) window.scrollTo({ top: 0 });
-  }, [memberIdx]);
-  const openMember = (i) => {
-    memberOpenedHere.current = true;
-    window.location.hash = `member-${i}`;
+    if (memberIdx !== null || expenseId) window.scrollTo({ top: 0 });
+  }, [memberIdx, expenseId]);
+  // Nama "Aku…" yang dipilih di HP ini (dipakai buat "Ditandai …")
+  useEffect(() => {
+    const v = localStorage.getItem(ME_KEY);
+    setMeIdx(v !== null && v !== "" ? Number(v) : null);
+  }, [tab, memberIdx]);
+  const openHash = (h) => {
+    hashDepth.current += 1;
+    window.location.hash = h;
   };
-  const closeMember = () => {
-    if (memberOpenedHere.current) {
-      memberOpenedHere.current = false;
+  const openMember = (i) => openHash(`member-${i}`);
+  const openExpense = (id) => openHash(`expense-${id}`);
+  const closeHash = () => {
+    if (hashDepth.current > 0) {
+      hashDepth.current -= 1;
       window.history.back();
     } else {
       window.history.replaceState(null, "", window.location.pathname + window.location.search);
       setMemberIdx(null);
+      setExpenseId(null);
     }
   };
 
   const { trip, currencies, people, days, expenses, packing } = data;
-  const payments = data.payments || [];
   const home = currencies[0];
   const viewingMember = memberIdx !== null && memberIdx < people.length;
 
-  // Removed travelers stay in the data (so money still adds up) but are hidden from lists
+  // Anggota yang keluar tetap ada di data (biar hitungan uang tetap benar), cuma disembunyikan
   const activeIdx = people.map((_, i) => i).filter((i) => !people[i].removed);
   const activeCount = Math.max(1, activeIdx.length);
   const isActive = (i) => !!people[i] && !people[i].removed;
   const activeNames = activeIdx.map((i) => people[i].name);
 
-  // ── generic updaters ──
+  // ── updater umum ──
   const setTrip = (f, v) => setData((d) => ({ ...d, trip: { ...d.trip, [f]: v } }));
   const upd = (k, i, f, v) => setData((d) => ({ ...d, [k]: d[k].map((r, j) => (j === i ? { ...r, [f]: v } : r)) }));
   const add = (k, row) => setData((d) => ({ ...d, [k]: [...d[k], row] }));
   const del = (k, i) => setData((d) => ({ ...d, [k]: d[k].filter((_, j) => j !== i) }));
   const reset = () => {
-    if (confirm("Reset everything to the starter template? This clears it for ALL friends.\n\nA backup is saved first, so you can undo this from History.")) setData(defaults(), { reason: "reset" });
+    if (confirm("Reset semua ke awal? Ini ngehapus data buat semua orang.\n\nTenang, ada backup otomatis, bisa dibalikin dari Riwayat.")) setData(defaults(), { reason: "reset" });
   };
   const restore = (snapshot) => setData(migrate(snapshot), { reason: "restore" });
 
-  // ── travelers ──
+  // ── tanda lunas: [{ id: pengeluaran, j: orang }] ──
+  const setPaidMany = (items, paidNow) =>
+    setData((d) => ({
+      ...d,
+      expenses: d.expenses.map((e) => {
+        const mine = items.filter((x) => x.id === e.id);
+        if (!mine.length) return e;
+        const paid = { ...(e.paid || {}) };
+        mine.forEach(({ j }) => {
+          if (paidNow) paid[j] = { by: meIdx, at: Date.now() };
+          else delete paid[j];
+        });
+        return { ...e, paid };
+      }),
+    }));
+
+  // ── anggota ──
   const addPerson = (name) => setData((d) => ({ ...d, people: [...d.people, { id: uid(), name, months: [], photo: "" }] }));
   const removePerson = (i) => {
     if (activeIdx.length <= 1) {
-      alert("A trip needs at least one traveler.");
+      alert("Minimal harus ada satu anggota.");
       return;
     }
-    if (
-      !confirm(`Remove ${people[i].name} from the trip?\n\nTheir savings, expenses and payments stay in the records, so the money still adds up. They just won't show up in new expenses or lists. You can restore them anytime from Manage.`)
-    )
-      return;
+    if (!confirm(`Keluarin ${people[i].name} dari trip?\n\nTabungan dan pengeluarannya tetap tercatat, jadi hitungan uang nggak berubah. Bisa dibalikin kapan aja dari Atur.`)) return;
     upd("people", i, "removed", true);
   };
   const restorePerson = (i) => upd("people", i, "removed", false);
   const setPhoto = (i, url) => upd("people", i, "photo", url);
 
-  // ── savings ──
+  // ── tabungan ──
   const updMonth = (i, m, v) =>
     setData((d) => ({
       ...d,
@@ -268,20 +308,20 @@ export default function App() {
   const addDay = () => setDays((ds) => [...ds, { id: uid(), label: "", date: nextDate(ds.length ? ds[ds.length - 1].date : ""), rows: [blankRow()] }]);
   const delDay = (di) => {
     const has = days[di].rows.some((r) => r.place || r.activity || r.time);
-    if (!has || confirm("Delete this whole day and all its rows?")) setDays((ds) => ds.filter((_, j) => j !== di));
+    if (!has || confirm("Hapus hari ini beserta isinya?")) setDays((ds) => ds.filter((_, j) => j !== di));
   };
   const updRow = (di, ri, f, v) => setDays((ds) => ds.map((x, j) => (j === di ? { ...x, rows: x.rows.map((r, k) => (k === ri ? { ...r, [f]: v } : r)) } : x)));
   const addRow = (di) => setDays((ds) => ds.map((x, j) => (j === di ? { ...x, rows: [...x.rows, blankRow()] } : x)));
   const delRow = (di, ri) => setDays((ds) => ds.map((x, j) => (j === di ? { ...x, rows: x.rows.filter((_, k) => k !== ri) } : x)));
 
-  // ── currencies ──
+  // ── mata uang ──
   const curOf = (code) => currencies.find((c) => c.code === code) || home;
   const decOf = (code) => (NO_DECIMALS.includes(String(code).toUpperCase()) ? 0 : 2);
   const rateOf = (code) => (code === home.code ? 1 : num(curOf(code).rate));
   const fmt = (n, code = home.code) => {
     const c = curOf(code);
     const dec = decOf(c.code);
-    return `${c.symbol}${num(n).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: dec })}`;
+    return `${c.symbol}${num(n).toLocaleString("id-ID", { minimumFractionDigits: 0, maximumFractionDigits: dec })}`;
   };
   const updCur = (ci, f, v) =>
     setData((d) => {
@@ -296,68 +336,13 @@ export default function App() {
       return { ...d, currencies: d.currencies.filter((_, j) => j !== ci), expenses: d.expenses.map((e) => (e.cur === code ? { ...e, cur: d.currencies[0].code } : e)) };
     });
 
-  // ── expenses ──
-  const toggleSplit = (ei, pi) =>
-    setData((d) => ({
-      ...d,
-      expenses: d.expenses.map((e, j) => (j !== ei ? e : { ...e, split: e.split.includes(pi) ? e.split.filter((x) => x !== pi) : [...e.split, pi].sort((a, b) => a - b) })),
-    }));
-  // "all" = every active traveler; removed travelers already in the split stay in it
-  const setSplitAll = (ei, all) =>
-    setData((d) => ({
-      ...d,
-      expenses: d.expenses.map((e, j) => {
-        if (j !== ei) return e;
-        const keepRemoved = e.split.filter((x) => !isActive(x));
-        return { ...e, split: all ? [...new Set([...keepRemoved, ...activeIdx])].sort((a, b) => a - b) : keepRemoved };
-      }),
-    }));
-
-  // ── payments (paying each other back) ──
-  const settleMode = trip.settleMode || "separate";
-  const setSettleMode = (v) => setTrip("settleMode", v);
-  const addPayment = (t, g) => {
-    const dec = decOf(g.fmtCode);
-    const amount = dec === 0 ? Math.round(t.amt) : Math.round(t.amt * 100) / 100;
-    if (!confirm(`Mark that ${people[t.from].name} paid ${people[t.to].name} ${fmt(amount, g.fmtCode)}?`)) return;
-    setData((d) => ({ ...d, payments: [...(d.payments || []), { id: uid(), from: t.from, to: t.to, amount, cur: g.fmtCode, at: Date.now() }] }));
-  };
-  const delPayment = (id) => {
-    if (confirm("Undo this payment? It'll show as unpaid again.")) setData((d) => ({ ...d, payments: (d.payments || []).filter((x) => x.id !== id) }));
-  };
-
-  // Person-to-person balances: personal expenses minus payments already made.
-  // Fund-paid expenses are left out: nobody owes anybody for those.
-  const balances = (code) => {
-    const b = people.map(() => 0);
-    expenses.forEach((e) => {
-      const amt = num(e.amount);
-      const split = e.split.filter((i) => i < people.length);
-      if (isFund(e) || e.settled || !amt || !split.length || e.paidBy >= people.length) return;
-      let a = amt;
-      if (code === "__ALL__") a = amt * rateOf(e.cur);
-      else if (e.cur !== code) return;
-      b[e.paidBy] += a;
-      split.forEach((i) => (b[i] -= a / split.length));
-    });
-    payments.forEach((x) => {
-      if (x.from >= people.length || x.to >= people.length) return;
-      let a = num(x.amount);
-      if (code === "__ALL__") a = a * rateOf(x.cur);
-      else if (x.cur !== code) return;
-      b[x.from] += a;
-      b[x.to] -= a;
-    });
-    return b;
-  };
-
-  // ── calculations ──
+  // ── hitungan ──
   let countdown = null;
   if (trip.start) {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const diff = Math.ceil((new Date(trip.start + "T00:00:00") - today) / 86400000);
-    countdown = diff > 0 ? `${diff} day${diff === 1 ? "" : "s"} to go` : diff === 0 ? "Trip starts today" : "Trip completed";
+    countdown = diff > 0 ? `${diff} hari lagi` : diff === 0 ? "Berangkat hari ini" : "Trip selesai";
   }
 
   const saveStart = trip.saveStart || thisMonth();
@@ -367,13 +352,13 @@ export default function App() {
   const [sy, sm] = saveStart.split("-").map(Number);
   const monthLabels = Array.from({ length: nMonths }, (_, k) => {
     const d = new Date(sy, sm - 1 + k, 1);
-    return { short: d.toLocaleString("en", { month: "short" }), year: String(d.getFullYear()).slice(2) };
+    return { short: d.toLocaleString("id-ID", { month: "short" }), year: String(d.getFullYear()).slice(2) };
   });
   const firstLabel = `${monthLabels[0].short} ${monthLabels[0].year}`;
   const lastLabel = `${monthLabels[nMonths - 1].short} ${monthLabels[nMonths - 1].year}`;
   const now = new Date();
   const curIdx = (now.getFullYear() - sy) * 12 + now.getMonth() - (sm - 1);
-  const monthly = num(trip.monthly); // minimum per person per month
+  const monthly = num(trip.monthly); // minimal per orang per bulan
   const monthsOf = (p) => Array.from({ length: nMonths }, (_, k) => p.months[k] ?? "");
   const personTotal = (p) => monthsOf(p).reduce((s, v) => s + num(v), 0);
   const monthTotal = (k) => people.reduce((s, p) => s + num(p.months[k]), 0);
@@ -394,21 +379,9 @@ export default function App() {
   };
 
   const totalHome = expenses.reduce((s, e) => s + num(e.amount) * rateOf(e.cur), 0);
-  const perCur = currencies.map((c) => ({ code: c.code, total: expenses.filter((e) => e.cur === c.code).reduce((s, e) => s + num(e.amount), 0) })).filter((x) => x.total);
-  const unsettled = expenses.filter((e) => !isFund(e) && !e.settled && num(e.amount) > 0);
   const missingRate = currencies.slice(1).some((c) => !num(c.rate));
-  const settleGroups =
-    settleMode === "combined"
-      ? [{ code: "__ALL__", label: `All currencies → ${home.code}`, fmtCode: home.code }]
-      : currencies.filter((c) => unsettled.some((e) => e.cur === c.code) || payments.some((x) => x.cur === c.code)).map((c) => ({ code: c.code, label: c.code, fmtCode: c.code }));
-  const settleData = settleGroups.map((g) => {
-    const bal = balances(g.code);
-    return { ...g, bal, tr: settle(bal, decOf(g.fmtCode)) };
-  });
-  const allSettled = settleData.every((g) => g.tr.length === 0);
-  const stillToPay = settleData.reduce((s, g) => s + g.tr.reduce((a, t) => a + t.amt * rateOf(g.fmtCode), 0), 0);
 
-  // ── group fund (all in home currency, same as the Save tab) ──
+  // ── kas (semua dalam mata uang utama, sama kayak tab Nabung) ──
   const fundExpenses = expenses.filter((e) => isFund(e) && num(e.amount) > 0);
   const fundSpent = fundExpenses.reduce((s, e) => s + num(e.amount) * rateOf(e.cur), 0);
   const fundLeft = totalSaved - fundSpent;
@@ -419,23 +392,20 @@ export default function App() {
     const each = (num(e.amount) * rateOf(e.cur)) / split.length;
     split.forEach((i) => (fundShare[i] += each));
   });
-  const fundUnassigned = fundExpenses.filter((e) => !e.split.some((i) => i < people.length)).length;
   const homeEps = decOf(home.code) === 0 ? 0.5 : 0.005;
-  // Fund table: everyone active, plus removed travelers who still have money in it
-  const fundRows = people.map((_, i) => i).filter((i) => isActive(i) || Math.abs(personTotal(people[i]) - fundShare[i]) >= homeEps);
 
   const packed = packing.filter((p) => p.done).length;
 
   const tabs = [
-    { id: "save", label: "Save", Icon: PiggyBank, on: "text-emerald-600 border-emerald-500" },
-    { id: "ideas", label: "Ideas", Icon: Lightbulb, on: "text-violet-600 border-violet-500" },
+    { id: "save", label: "Nabung", Icon: PiggyBank, on: "text-emerald-600 border-emerald-500" },
+    { id: "ideas", label: "Ide", Icon: Lightbulb, on: "text-violet-600 border-violet-500" },
     { id: "itinerary", label: "Itinerary", Icon: CalendarDays, on: "text-indigo-600 border-indigo-500" },
-    { id: "budget", label: "Budget & Split", Icon: Wallet, on: "text-amber-600 border-amber-500" },
-    { id: "packing", label: "Packing", Icon: Luggage, on: "text-sky-600 border-sky-500" },
+    { id: "budget", label: "Pengeluaran", Icon: Wallet, on: "text-amber-600 border-amber-500" },
+    { id: "packing", label: "Bawaan", Icon: Luggage, on: "text-sky-600 border-sky-500" },
   ];
 
   if (!ready) {
-    return <div className="min-h-screen bg-slate-50 flex items-center justify-center text-sm text-slate-400">{status === "error" ? "Couldn't load the trip. Retrying…" : "Loading trip…"}</div>;
+    return <div className="min-h-screen bg-slate-50 flex items-center justify-center text-sm text-slate-400">{status === "error" ? "Gagal memuat. Nyoba lagi…" : "Memuat…"}</div>;
   }
 
   return (
@@ -452,7 +422,7 @@ export default function App() {
             <div className="flex flex-wrap gap-2 mt-3 text-sm">
               <label className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-lg pl-2.5">
                 <MapPin size={15} className="text-rose-500" />
-                <Cell value={trip.dest} onChange={(v) => setTrip("dest", v)} className="w-44" placeholder="Destination" />
+                <Cell value={trip.dest} onChange={(v) => setTrip("dest", v)} className="w-44" placeholder="Tujuan" />
               </label>
               <label className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-lg pl-2.5">
                 <Calendar size={15} className="text-emerald-500" />
@@ -464,28 +434,23 @@ export default function App() {
             <div className="flex flex-wrap items-center gap-y-2 mt-4">
               <div className="flex -space-x-1.5">
                 {activeIdx.map((i) => (
-                  <button
-                    key={people[i].id || i}
-                    onClick={() => openMember(i)}
-                    title={`Open ${people[i].name}'s page`}
-                    className={`rounded-full ring-2 hover:z-10 hover:scale-110 transition ${memberIdx === i ? "ring-indigo-400 z-10" : "ring-white"}`}
-                  >
+                  <button key={people[i].id || i} onClick={() => openMember(i)} title={people[i].name} className={`rounded-full ring-2 hover:z-10 hover:scale-110 transition ${memberIdx === i ? "ring-indigo-400 z-10" : "ring-white"}`}>
                     <Avatar name={people[i].name} i={i} photo={people[i].photo} />
                   </button>
                 ))}
               </div>
-              <span className="text-sm text-slate-500 ml-3">{activeIdx.length} travelers</span>
+              <span className="text-sm text-slate-500 ml-3">{activeIdx.length} anggota</span>
               <button
                 onClick={() => setShowManage((v) => !v)}
                 className={`ml-3 inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg transition ${showManage ? "bg-indigo-100 text-indigo-700" : "text-indigo-600 hover:bg-indigo-50"}`}
               >
-                <Users size={14} /> Manage
+                <Users size={14} /> Atur
               </button>
             </div>
           </div>
         </div>
 
-        {/* Tabs */}
+        {/* Tab */}
         <div className="flex items-end justify-between mt-6 border-b border-slate-200">
           <div className="flex gap-1 overflow-x-auto">
             {tabs.map(({ id, label, Icon, on }) => (
@@ -493,7 +458,7 @@ export default function App() {
                 key={id}
                 onClick={() => {
                   setTab(id);
-                  if (viewingMember) closeMember();
+                  if (viewingMember || expenseId) closeHash();
                 }}
                 className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition ${tab === id && !viewingMember ? on : "border-transparent text-slate-500 hover:text-slate-700"}`}
               >
@@ -503,7 +468,7 @@ export default function App() {
           </div>
           <div className="flex items-center gap-3 pb-2 shrink-0">
             <span className={`text-xs hidden sm:inline ${status === "error" ? "text-rose-500" : "text-slate-400"}`}>{STATUS_TEXT[status]}</span>
-            <button onClick={() => setShowHistory((v) => !v)} title="History" className={`p-1.5 rounded-md hover:text-slate-600 hover:bg-slate-100 ${showHistory ? "text-slate-700 bg-slate-100" : "text-slate-400"}`}>
+            <button onClick={() => setShowHistory((v) => !v)} title="Riwayat" className={`p-1.5 rounded-md hover:text-slate-600 hover:bg-slate-100 ${showHistory ? "text-slate-700 bg-slate-100" : "text-slate-400"}`}>
               <HistoryIcon size={15} />
             </button>
             <button onClick={reset} title="Reset" className="p-1.5 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100">
@@ -530,14 +495,13 @@ export default function App() {
           )}
           {showHistory && <HistoryPanel onRestore={restore} onClose={() => setShowHistory(false)} />}
 
-          {/* ═════════ MEMBER PAGE ═════════ */}
+          {/* ═════════ HALAMAN ANGGOTA ═════════ */}
           {viewingMember && (
             <MemberPage
               index={memberIdx}
               people={people}
               expenses={expenses}
               packing={packing}
-              payments={payments}
               monthLabels={monthLabels}
               curIdx={curIdx}
               monthly={monthly}
@@ -547,21 +511,20 @@ export default function App() {
               fmt={fmt}
               rateOf={rateOf}
               homeEps={homeEps}
-              settleData={settleData}
-              onMarkPaid={addPayment}
-              onDeletePayment={delPayment}
+              onSetPaid={setPaidMany}
               onRename={(v) => upd("people", memberIdx, "name", v)}
               onOpenMember={openMember}
-              onBack={closeMember}
+              onOpenExpense={openExpense}
+              onBack={closeHash}
             />
           )}
 
-          {/* ═════════ SAVE ═════════ */}
+          {/* ═════════ NABUNG ═════════ */}
           {!viewingMember && tab === "save" && (
             <div className="space-y-4">
               <div className="bg-white rounded-xl border border-slate-200 p-4 flex flex-wrap gap-x-6 gap-y-3 items-center">
                 <label className="flex items-center gap-2 text-sm">
-                  <span className="text-slate-500 font-medium">Start saving from</span>
+                  <span className="text-slate-500 font-medium">Mulai nabung</span>
                   <input
                     type="month"
                     value={saveStart}
@@ -570,7 +533,7 @@ export default function App() {
                   />
                 </label>
                 <label className="flex items-center gap-2 text-sm">
-                  <span className="text-slate-500 font-medium">Stop saving after</span>
+                  <span className="text-slate-500 font-medium">Berhenti nabung</span>
                   <input
                     type="month"
                     value={saveEnd}
@@ -581,34 +544,34 @@ export default function App() {
                   />
                 </label>
                 <label className="flex items-center gap-2 text-sm">
-                  <span className="text-slate-500 font-medium">Minimum per person / month</span>
+                  <span className="text-slate-500 font-medium">Minimal per orang / bulan</span>
                   <div className="flex items-center bg-slate-50 border border-slate-200 rounded-md pl-2">
                     <span className="text-slate-400">{home.symbol}</span>
-                    <Cell type="number" value={trip.monthly} onChange={(v) => setTrip("monthly", v)} className="w-32" placeholder="Not decided yet" />
+                    <Cell type="number" value={trip.monthly} onChange={(v) => setTrip("monthly", v)} className="w-32" placeholder="Belum ditentukan" />
                   </div>
                 </label>
                 <span className="text-xs text-slate-400">
-                  {nMonths} month{nMonths === 1 ? "" : "s"} · {firstLabel} – {lastLabel} · in {home.code}
+                  {nMonths} bulan, {firstLabel} – {lastLabel}
                 </span>
-                {endBeforeStart && <span className="text-xs text-rose-500 w-full">The stop month is before the start month. Pick a later stop month.</span>}
+                {endBeforeStart && <span className="text-xs text-rose-500 w-full">Bulan berhenti ada sebelum bulan mulai.</span>}
               </div>
 
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <Stat label="Total saved" value={fmt(totalSaved)} accent="bg-emerald-500" sub={`${fmt(totalSaved / activeCount)} avg per person`} />
+                <Stat label="Total tabungan" value={fmt(totalSaved)} accent="bg-emerald-500" sub={`Rata-rata ${fmt(totalSaved / activeCount)} per orang`} />
                 <Stat
-                  label={curLabel ? `${curLabel} collected` : "This month"}
-                  value={curLabel ? fmt(monthTotal(curIdx)) : "—"}
+                  label={curLabel ? `Terkumpul ${curLabel}` : "Bulan ini"}
+                  value={curLabel ? fmt(monthTotal(curIdx)) : "–"}
                   accent="bg-teal-500"
-                  sub={curLabel ? `${paidThisMonth} of ${activeIdx.length} have paid` : curIdx < 0 ? "Saving hasn't started" : "Saving period ended"}
+                  sub={curLabel ? `${paidThisMonth} dari ${activeIdx.length} udah setor` : curIdx < 0 ? "Belum mulai" : "Periode nabung udah selesai"}
                 />
-                <Stat label="Group minimum" value={monthly ? fmt(groupTarget) : "Not set"} accent="bg-amber-400" sub={monthly ? `${fmt(monthly * nMonths)} per person` : "Set a monthly minimum above"} />
-                <Stat label="Months left" value={monthsLeft} accent="bg-indigo-400" sub={curLabel ? `Currently month ${curIdx + 1} of ${nMonths}` : null} />
+                <Stat label="Target minimal" value={monthly ? fmt(groupTarget) : "Belum diatur"} accent="bg-amber-400" sub={monthly ? `${fmt(monthly * nMonths)} per orang` : "Isi minimal per bulan dulu"} />
+                <Stat label="Sisa bulan" value={monthsLeft} accent="bg-indigo-400" sub={curLabel ? `Bulan ke-${curIdx + 1} dari ${nMonths}` : null} />
               </div>
 
               {monthly > 0 && (
                 <div className="bg-white rounded-xl border border-slate-200 p-4">
                   <div className="flex justify-between text-sm mb-2">
-                    <span className="font-medium text-slate-600">Progress to group minimum</span>
+                    <span className="font-medium text-slate-600">Menuju target minimal</span>
                     <span className="font-semibold text-emerald-600">{groupTarget ? Math.round((totalSaved / groupTarget) * 100) : 0}%</span>
                   </div>
                   <Bar pct={groupTarget ? (totalSaved / groupTarget) * 100 : 0} color="bg-gradient-to-r from-emerald-400 to-teal-500" />
@@ -619,14 +582,14 @@ export default function App() {
                 <table className="w-full min-w-max border-collapse">
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
-                      <TH className="sticky left-0 bg-slate-50 z-10">Traveler</TH>
+                      <TH className="sticky left-0 bg-slate-50 z-10">Anggota</TH>
                       {monthLabels.map((m, k) => (
                         <th key={k} className={`px-1 py-2 text-center text-xs font-semibold ${k === curIdx ? "bg-emerald-100 text-emerald-700" : "text-slate-500"}`}>
                           <div className="uppercase tracking-wide">{m.short}</div>
                           <div className="font-normal opacity-60">'{m.year}</div>
                         </th>
                       ))}
-                      <TH className="text-right bg-slate-100">Total saved</TH>
+                      <TH className="text-right bg-slate-100">Total</TH>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -636,7 +599,7 @@ export default function App() {
                         <tr key={p.id || i}>
                           <td className="px-3 py-1 sticky left-0 bg-white z-10 border-r border-slate-100">
                             <div className="flex items-center gap-2">
-                              <button onClick={() => openMember(i)} title={`Open ${p.name}'s page`} className="rounded-full hover:scale-110 transition">
+                              <button onClick={() => openMember(i)} title={p.name} className="rounded-full hover:scale-110 transition">
                                 <Avatar name={p.name} i={i} photo={p.photo} />
                               </button>
                               <Cell value={p.name} onChange={(v) => upd("people", i, "name", v)} className="font-medium w-28" />
@@ -656,7 +619,7 @@ export default function App() {
                   </tbody>
                   <tfoot className="border-t-2 border-slate-200 bg-slate-50">
                     <tr>
-                      <td className="px-3 py-2.5 text-sm font-semibold sticky left-0 bg-slate-50 z-10">Month total</td>
+                      <td className="px-3 py-2.5 text-sm font-semibold sticky left-0 bg-slate-50 z-10">Total</td>
                       {monthLabels.map((_, k) => (
                         <td key={k} className={`px-1 py-2.5 text-center text-xs font-semibold ${k === curIdx ? "bg-emerald-100 text-emerald-700" : "text-slate-600"}`}>
                           {monthTotal(k) ? fmt(monthTotal(k)) : "–"}
@@ -670,30 +633,30 @@ export default function App() {
 
               <div className="flex flex-wrap gap-4 text-xs text-slate-500">
                 <span className="flex items-center gap-1.5">
-                  <span className="w-3 h-3 rounded bg-emerald-100 border border-emerald-200" /> Paid
+                  <span className="w-3 h-3 rounded bg-emerald-100 border border-emerald-200" /> Udah setor
                 </span>
                 {monthly > 0 && (
                   <span className="flex items-center gap-1.5">
-                    <span className="w-3 h-3 rounded bg-amber-100 border border-amber-200" /> Below the {fmt(monthly)} minimum
+                    <span className="w-3 h-3 rounded bg-amber-100 border border-amber-200" /> Kurang dari {fmt(monthly)}
                   </span>
                 )}
                 <span className="flex items-center gap-1.5">
-                  <span className="w-3 h-3 rounded bg-rose-100 border border-rose-200" /> Missed (past month)
+                  <span className="w-3 h-3 rounded bg-rose-100 border border-rose-200" /> Bolong
                 </span>
                 <span className="flex items-center gap-1.5">
-                  <span className="w-3 h-3 rounded bg-emerald-200" /> Current month
+                  <span className="w-3 h-3 rounded bg-emerald-200" /> Bulan ini
                 </span>
               </div>
               {removedSaved > 0 && (
                 <p className="text-xs text-slate-500">
-                  Totals include {fmt(removedSaved)} saved by removed travelers ({removedSavers.map((p) => p.name).join(", ")}).
+                  Termasuk {fmt(removedSaved)} dari yang udah keluar ({removedSavers.map((p) => p.name).join(", ")}).
                 </p>
               )}
-              {hiddenSavings && <p className="text-xs text-amber-600">Some amounts were entered for months after {lastLabel}. They're hidden and not counted, but they come back if you move the stop month later.</p>}
+              {hiddenSavings && <p className="text-xs text-amber-600">Ada setoran setelah {lastLabel} yang disembunyikan. Muncul lagi kalau bulan berhenti dimundurin.</p>}
             </div>
           )}
 
-          {/* ═════════ IDEAS ═════════ */}
+          {/* ═════════ IDE ═════════ */}
           {!viewingMember && tab === "ideas" && <IdeasTab data={data} setData={setData} />}
 
           {/* ═════════ ITINERARY ═════════ */}
@@ -703,12 +666,12 @@ export default function App() {
                 <table className="w-full min-w-max border-collapse">
                   <thead className="bg-slate-800 text-white">
                     <tr>
-                      <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide w-48">Day</th>
-                      <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide">Est. Time</th>
-                      <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide">Place</th>
-                      <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide">Activity</th>
-                      <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide">Est. Price</th>
-                      <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide bg-amber-500">Notes</th>
+                      <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide w-48">Hari</th>
+                      <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide">Jam</th>
+                      <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide">Tempat</th>
+                      <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide">Kegiatan</th>
+                      <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide">Kira-kira harga</th>
+                      <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide bg-amber-500">Catatan</th>
                       <th className="w-10" />
                     </tr>
                   </thead>
@@ -719,15 +682,13 @@ export default function App() {
                           {ri === 0 && (
                             <td rowSpan={day.rows.length + 1} className="align-top px-3 py-3 border-r border-slate-200">
                               <div className="flex items-center justify-between">
-                                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${DAY_TINT[di % DAY_TINT.length]}`}>Day {di + 1}</span>
-                                <Del onClick={() => delDay(di)} title="Delete day" />
+                                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${DAY_TINT[di % DAY_TINT.length]}`}>Hari {di + 1}</span>
+                                <Del onClick={() => delDay(di)} title="Hapus hari" />
                               </div>
                               {day.date && <div className="text-base font-semibold text-slate-800 mt-2 px-2 capitalize">{weekday(day.date)}</div>}
                               <Cell type="date" value={day.date} onChange={(v) => updDay(di, "date", v)} className="text-slate-500 w-40" />
-                              <Cell value={day.label} onChange={(v) => updDay(di, "label", v)} className="text-xs text-slate-500" placeholder="Day title (optional)" />
-                              <div className="text-xs text-slate-400 px-2 mt-1">
-                                {day.rows.length} stop{day.rows.length === 1 ? "" : "s"}
-                              </div>
+                              <Cell value={day.label} onChange={(v) => updDay(di, "label", v)} className="text-xs text-slate-500" placeholder="Judul (opsional)" />
+                              <div className="text-xs text-slate-400 px-2 mt-1">{day.rows.length} tempat</div>
                             </td>
                           )}
                           {r ? (
@@ -737,15 +698,15 @@ export default function App() {
                               </td>
                               <td className="px-1 py-0.5 align-top min-w-56">
                                 <div className="flex items-center gap-0.5">
-                                  <Cell value={r.place} onChange={(v) => updRow(di, ri, "place", v)} className={r.link ? "text-indigo-600 underline underline-offset-2" : ""} placeholder="Place" />
+                                  <Cell value={r.place} onChange={(v) => updRow(di, ri, "place", v)} className={r.link ? "text-indigo-600 underline underline-offset-2" : ""} placeholder="Tempat" />
                                   {r.link && isUrl(r.link) && (
-                                    <a href={r.link} target="_blank" rel="noreferrer" title="Open link" className="p-1 text-indigo-500 hover:bg-indigo-50 rounded">
+                                    <a href={r.link} target="_blank" rel="noreferrer" title="Buka link" className="p-1 text-indigo-500 hover:bg-indigo-50 rounded">
                                       <ExternalLink size={14} />
                                     </a>
                                   )}
                                   <button
                                     onClick={() => setLinkEdit(linkEdit === r.id ? null : r.id)}
-                                    title="Add / edit link"
+                                    title="Link"
                                     className={`p-1 rounded hover:bg-slate-100 ${r.link ? "text-indigo-400" : "text-slate-300 opacity-0 group-hover:opacity-100"}`}
                                   >
                                     <Link2 size={14} />
@@ -758,34 +719,34 @@ export default function App() {
                                     onChange={(v) => updRow(di, ri, "link", v)}
                                     onBlur={() => setLinkEdit(null)}
                                     className="text-xs text-indigo-600 bg-indigo-50 mt-0.5"
-                                    placeholder="Paste link (Google Maps, website…)"
+                                    placeholder="Tempel link (Google Maps, website…)"
                                   />
                                 )}
                               </td>
                               <td className="px-1 py-0.5 align-top">
-                                <Cell value={r.activity} onChange={(v) => updRow(di, ri, "activity", v)} className="min-w-40" placeholder="Activity" />
+                                <Cell value={r.activity} onChange={(v) => updRow(di, ri, "activity", v)} className="min-w-40" placeholder="Kegiatan" />
                               </td>
                               <td className="px-1 py-0.5 align-top">
                                 <Cell value={r.price} onChange={(v) => updRow(di, ri, "price", v)} className="w-32" placeholder="RM20-40" />
                               </td>
                               <td className="px-1 py-0.5 align-top min-w-64">
                                 <div className="flex items-center gap-0.5">
-                                  <Cell value={r.notes} onChange={(v) => updRow(di, ri, "notes", v)} className={isUrl(r.notes) ? "text-indigo-600 truncate" : ""} placeholder="Notes" />
+                                  <Cell value={r.notes} onChange={(v) => updRow(di, ri, "notes", v)} className={isUrl(r.notes) ? "text-indigo-600 truncate" : ""} placeholder="Catatan" />
                                   {isUrl(r.notes) && (
-                                    <a href={r.notes.trim()} target="_blank" rel="noreferrer" title="Open link" className="p-1 text-indigo-500 hover:bg-indigo-50 rounded">
+                                    <a href={r.notes.trim()} target="_blank" rel="noreferrer" title="Buka link" className="p-1 text-indigo-500 hover:bg-indigo-50 rounded">
                                       <ExternalLink size={14} />
                                     </a>
                                   )}
                                 </div>
                               </td>
                               <td className="px-1 align-top pt-1 opacity-0 group-hover:opacity-100 transition">
-                                <Del onClick={() => delRow(di, ri)} title="Delete row" />
+                                <Del onClick={() => delRow(di, ri)} title="Hapus baris" />
                               </td>
                             </>
                           ) : (
                             <td colSpan={6} className="px-2 py-1.5">
                               <button onClick={() => addRow(di)} className="inline-flex items-center gap-1 text-xs font-medium text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 px-2 py-1 rounded-md">
-                                <Plus size={14} /> Add row
+                                <Plus size={14} /> Tambah baris
                               </button>
                             </td>
                           )}
@@ -794,306 +755,50 @@ export default function App() {
                     </tbody>
                   ))}
                 </table>
-                {days.length === 0 && <div className="text-center text-sm text-slate-400 py-10">No days yet. Add your first day below.</div>}
+                {days.length === 0 && <div className="text-center text-sm text-slate-400 py-10">Belum ada hari.</div>}
               </div>
               <div className="mt-4">
                 <Btn onClick={addDay} color="bg-indigo-500 hover:bg-indigo-600">
-                  <Plus size={16} /> Add day
+                  <Plus size={16} /> Tambah hari
                 </Btn>
               </div>
             </div>
           )}
 
-          {/* ═════════ BUDGET & SPLIT ═════════ */}
+          {/* ═════════ PENGELUARAN ═════════ */}
           {!viewingMember && tab === "budget" && (
-            <div className="space-y-5">
-              {/* Currencies */}
-              <div className="bg-white rounded-xl border border-slate-200 p-4">
-                <div className="text-sm font-semibold text-slate-700 mb-3">Currencies & exchange rates</div>
-                <div className="flex flex-wrap gap-3">
-                  {currencies.map((c, ci) => (
-                    <div key={c.id || ci} className={`flex items-center gap-1 rounded-lg border px-2 py-1 ${ci === 0 ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-slate-50"}`}>
-                      <Cell value={c.code} onChange={(v) => updCur(ci, "code", v.toUpperCase())} className="w-14 font-semibold" placeholder="CODE" />
-                      <Cell value={c.symbol} onChange={(v) => updCur(ci, "symbol", v)} className="w-12" placeholder="Sym" />
-                      {ci === 0 ? (
-                        <span className="text-xs font-medium text-emerald-700 px-2">Home currency</span>
-                      ) : (
-                        <>
-                          <span className="text-xs text-slate-500 whitespace-nowrap">1 {c.code} =</span>
-                          <Cell type="number" value={c.rate} onChange={(v) => updCur(ci, "rate", v)} className="w-24" placeholder="rate" />
-                          <span className="text-xs text-slate-500">{home.code}</span>
-                          <Del onClick={() => delCur(ci)} />
-                        </>
-                      )}
-                    </div>
-                  ))}
-                  <button
-                    onClick={() => add("currencies", { id: uid(), code: "", symbol: "", rate: "" })}
-                    className="inline-flex items-center gap-1 text-sm text-amber-600 hover:bg-amber-50 px-3 rounded-lg border border-dashed border-amber-300"
-                  >
-                    <Plus size={14} /> Currency
-                  </button>
-                </div>
-                {missingRate && <div className="text-xs text-rose-500 mt-2">Some currencies have no exchange rate yet, so combined totals won't include them correctly.</div>}
-              </div>
-
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <Stat label={`Total spent (in ${home.code})`} value={fmt(totalHome)} accent="bg-amber-400" sub={perCur.map((x) => fmt(x.total, x.code)).join(" + ") || "No expenses yet"} />
-                <Stat label="Per person (avg)" value={fmt(totalHome / activeCount)} accent="bg-orange-400" />
-                <Stat label="Still to pay back" value={allSettled ? "Nothing" : fmt(stillToPay)} accent="bg-rose-400" sub={`${payments.length} payment${payments.length === 1 ? "" : "s"} made`} />
-                <Stat label="Savings vs cost" value={fmt(totalSaved - totalHome)} accent={totalSaved >= totalHome ? "bg-emerald-500" : "bg-rose-400"} sub={totalSaved >= totalHome ? "Savings cover the trip" : "Short of trip cost"} />
-              </div>
-
-              {/* Expense table */}
-              <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
-                <table className="w-full min-w-max">
-                  <thead className="bg-slate-50 border-b border-slate-200">
-                    <tr>
-                      <TH>Category</TH>
-                      <TH>Item</TH>
-                      <TH>Amount</TH>
-                      <TH>Paid by</TH>
-                      <TH>Split between</TH>
-                      <TH></TH>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {expenses.map((e, i) => {
-                      const cat = normCat(e.cat);
-                      const n = e.split.filter((x) => x < people.length).length;
-                      const fund = isFund(e);
-                      const allIn = activeIdx.length > 0 && activeIdx.every((j) => e.split.includes(j));
-                      // Show active travelers, plus removed ones who are still part of this expense
-                      const shown = people.map((_, j) => j).filter((j) => isActive(j) || e.split.includes(j));
-                      return (
-                        <tr key={e.id} title={e.settled ? "Settled earlier" : undefined} className={`hover:bg-slate-50/60 ${!fund && e.settled ? "opacity-50" : ""}`}>
-                          <td className="px-3 py-1.5">
-                            <Select value={cat} onChange={(v) => upd("expenses", i, "cat", v)} className={`font-medium ${CAT_TINT[cat]}`}>
-                              {CATS.map((c) => (
-                                <option key={c}>{c}</option>
-                              ))}
-                            </Select>
-                          </td>
-                          <td className="px-1">
-                            <Cell value={e.item} onChange={(v) => upd("expenses", i, "item", v)} className="font-medium min-w-44" placeholder="e.g. Grab to KL Sentral" />
-                          </td>
-                          <td className="px-1">
-                            <div className="flex items-center bg-slate-50 rounded-md">
-                              <Select value={e.cur} onChange={(v) => upd("expenses", i, "cur", v)} className="bg-slate-100 font-semibold">
-                                {currencies.map((c) => (
-                                  <option key={c.code} value={c.code}>
-                                    {c.code || "?"}
-                                  </option>
-                                ))}
-                              </Select>
-                              <Cell type="number" value={e.amount} onChange={(v) => upd("expenses", i, "amount", v)} className="w-28" placeholder="0" />
-                            </div>
-                          </td>
-                          <td className="px-2">
-                            <Select value={e.paidBy} onChange={(v) => upd("expenses", i, "paidBy", Number(v))} className={fund ? "bg-emerald-100 text-emerald-700 font-medium" : "bg-slate-100"}>
-                              <option value={FUND}>Group fund</option>
-                              {people.map(
-                                (p, j) =>
-                                  (isActive(j) || e.paidBy === j) && (
-                                    <option key={j} value={j}>
-                                      {p.name}
-                                      {p.removed ? " (removed)" : ""}
-                                    </option>
-                                  ),
-                              )}
-                            </Select>
-                          </td>
-                          <td className="px-2">
-                            <div className="flex items-center gap-1">
-                              {shown.map((j) => (
-                                <button key={j} title={people[j].name + (people[j].removed ? " (removed)" : "")} onClick={() => toggleSplit(i, j)}>
-                                  <Avatar name={people[j].name} i={j} photo={people[j].photo} size="w-6 h-6 text-xs" className={e.split.includes(j) ? (people[j].removed ? "ring-2 ring-slate-300" : "") : "opacity-20 grayscale"} />
-                                </button>
-                              ))}
-                              <button onClick={() => setSplitAll(i, !allIn)} className="text-xs text-slate-400 hover:text-slate-600 ml-1 w-10">
-                                {allIn ? "none" : "all"}
-                              </button>
-                              <span className="text-xs text-slate-500 whitespace-nowrap">{n ? `${fmt(num(e.amount) / n, e.cur)} each` : "no one"}</span>
-                            </div>
-                          </td>
-                          <td className="px-2">
-                            <Del onClick={() => del("expenses", i)} />
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-              <Btn
-                color="bg-amber-500 hover:bg-amber-600"
-                onClick={() => add("expenses", { id: uid(), cat: "Food", item: "", amount: "", cur: currencies[currencies.length > 1 ? 1 : 0].code, paidBy: activeIdx[0] ?? 0, split: [...activeIdx], settled: false })}
-              >
-                <Plus size={16} /> Add expense
-              </Btn>
-              <p className="text-xs text-slate-400 -mt-2">Tap the circles to choose who shares each expense, e.g. 2 Grab cars = 2 rows, each with its own group. Pick "Group fund" in Paid by for anything paid from the savings pot.</p>
-
-              {/* Group fund */}
-              <div className="bg-white rounded-xl border border-slate-200 p-4">
-                <div className="text-sm font-semibold text-slate-700 flex items-center gap-2 mb-4">
-                  <PiggyBank size={16} className="text-emerald-500" /> Group fund
-                  <span className="font-normal text-slate-400">· the savings pot from the Save tab</span>
-                </div>
-
-                <div className="grid grid-cols-3 gap-3 mb-4">
-                  <div className="rounded-lg bg-slate-50 p-3">
-                    <div className="text-xs text-slate-500">Collected</div>
-                    <div className="text-lg font-semibold text-slate-800">{fmt(totalSaved)}</div>
-                  </div>
-                  <div className="rounded-lg bg-slate-50 p-3">
-                    <div className="text-xs text-slate-500">Spent from fund</div>
-                    <div className="text-lg font-semibold text-slate-800">{fmt(fundSpent)}</div>
-                    <div className="text-xs text-slate-400">
-                      {fundExpenses.length} expense{fundExpenses.length === 1 ? "" : "s"}
-                    </div>
-                  </div>
-                  <div className={`rounded-lg p-3 ${fundLeft < -homeEps ? "bg-rose-50" : "bg-emerald-50"}`}>
-                    <div className={`text-xs ${fundLeft < -homeEps ? "text-rose-600" : "text-emerald-700"}`}>Left in fund</div>
-                    <div className={`text-lg font-semibold ${fundLeft < -homeEps ? "text-rose-600" : "text-emerald-700"}`}>
-                      {fundLeft < -homeEps ? "−" : ""}
-                      {fmt(Math.abs(fundLeft))}
-                    </div>
-                  </div>
-                </div>
-
-                {fundExpenses.length === 0 && <p className="text-xs text-slate-400 mb-3">Nothing has been paid from the fund yet. Pick "Group fund" in an expense's Paid by column and it'll show up here.</p>}
-                {fundUnassigned > 0 && (
-                  <p className="text-xs text-rose-500 mb-3">
-                    {fundUnassigned} fund expense{fundUnassigned === 1 ? " has" : "s have"} no one in the split, so {fundUnassigned === 1 ? "it isn't" : "they aren't"} counted in anyone's balance.
-                  </p>
-                )}
-
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm min-w-max">
-                    <thead className="border-b border-slate-200">
-                      <tr>
-                        <TH className="pl-0">Traveler</TH>
-                        <TH className="text-right">Saved</TH>
-                        <TH className="text-right">Share of fund spending</TH>
-                        <TH className="text-right pr-0">Balance</TH>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {fundRows.map((i) => {
-                        const p = people[i];
-                        const saved = personTotal(p);
-                        const bal = saved - fundShare[i];
-                        return (
-                          <tr key={p.id || i}>
-                            <td className="py-2">
-                              <button onClick={() => openMember(i)} className="flex items-center gap-2 hover:text-indigo-600">
-                                <Avatar name={p.name} i={i} photo={p.photo} size="w-6 h-6 text-xs" className={p.removed ? "grayscale opacity-60" : ""} />
-                                <span className="font-medium">{p.name}</span>
-                                {p.removed && <span className="text-[11px] text-slate-400">(removed)</span>}
-                              </button>
-                            </td>
-                            <td className="px-3 text-right">{fmt(saved)}</td>
-                            <td className="px-3 text-right text-slate-500">{fmt(fundShare[i])}</td>
-                            <td className="pl-3 text-right">
-                              {Math.abs(bal) < homeEps ? (
-                                <span className="text-xs text-slate-400">Even</span>
-                              ) : bal > 0 ? (
-                                <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">+{fmt(bal)} left</span>
-                              ) : (
-                                <span className="text-xs px-2 py-0.5 rounded-full bg-rose-50 text-rose-600">Top up {fmt(-bal)}</span>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-                <p className="text-xs text-slate-400 mt-3">Balance = what they saved minus their share of everything paid from the fund. Whatever's left at the end goes back to each person by their balance.</p>
-              </div>
-
-              {/* Settle up */}
-              <div className="bg-white rounded-xl border border-slate-200 p-4">
-                <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-                  <div className="text-sm font-semibold text-slate-700">
-                    Settle up <span className="font-normal text-slate-400">· who pays whom, for things paid personally</span>
-                  </div>
-                  <div className="flex bg-slate-100 rounded-lg p-0.5 text-xs font-medium">
-                    <button onClick={() => setSettleMode("separate")} className={`px-3 py-1.5 rounded-md ${settleMode === "separate" ? "bg-white shadow-sm text-slate-800" : "text-slate-500"}`}>
-                      Per currency
-                    </button>
-                    <button onClick={() => setSettleMode("combined")} className={`px-3 py-1.5 rounded-md ${settleMode === "combined" ? "bg-white shadow-sm text-slate-800" : "text-slate-500"}`}>
-                      Combined in {home.code}
-                    </button>
-                  </div>
-                </div>
-
-                {allSettled ? (
-                  <div className="text-center text-sm text-slate-400 py-6">Everyone is settled up ✓</div>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {settleData
-                      .filter((g) => g.tr.length > 0)
-                      .map((g) => (
-                        <div key={g.code} className="rounded-lg border border-slate-200 overflow-hidden">
-                          <div className="bg-amber-50 px-3 py-2">
-                            <span className="text-sm font-semibold text-amber-800">{g.label}</span>
-                          </div>
-                          <div className="divide-y divide-slate-100">
-                            {g.tr.map((t, k) => (
-                              <div key={k} className="flex flex-wrap items-center gap-2 px-3 py-2.5 text-sm">
-                                <button onClick={() => openMember(t.from)} className="flex items-center gap-2 hover:text-indigo-600">
-                                  <Avatar name={people[t.from].name} i={t.from} photo={people[t.from].photo} size="w-6 h-6 text-xs" />
-                                  <span className="font-medium">{people[t.from].name}</span>
-                                </button>
-                                <ArrowRight size={14} className="text-slate-400" />
-                                <button onClick={() => openMember(t.to)} className="flex items-center gap-2 hover:text-indigo-600">
-                                  <Avatar name={people[t.to].name} i={t.to} photo={people[t.to].photo} size="w-6 h-6 text-xs" />
-                                  <span className="font-medium">{people[t.to].name}</span>
-                                </button>
-                                <span className="ml-auto font-semibold text-rose-600">{fmt(t.amt, g.fmtCode)}</span>
-                                <button onClick={() => addPayment(t, g)} className="text-xs font-medium text-emerald-700 border border-emerald-200 hover:bg-emerald-50 px-2.5 py-1 rounded-md">
-                                  Mark paid
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
-                  </div>
-                )}
-
-                {payments.length > 0 && (
-                  <div className="mt-5 border-t border-slate-100 pt-3">
-                    <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Payments made</div>
-                    <div className="divide-y divide-slate-100">
-                      {[...payments]
-                        .sort((a, b) => (b.at || 0) - (a.at || 0))
-                        .map((x) => (
-                          <div key={x.id} className="flex items-center gap-2 py-2 text-sm">
-                            <Check size={14} className="text-emerald-500 shrink-0" />
-                            <span className="font-medium">{people[x.from]?.name || "Someone"}</span>
-                            <span className="text-slate-400">paid</span>
-                            <span className="font-medium">{people[x.to]?.name || "someone"}</span>
-                            <span className="text-xs text-slate-400">{fmtDate(x.at)}</span>
-                            <span className="ml-auto font-semibold text-emerald-700">{fmt(x.amount, x.cur)}</span>
-                            <Del onClick={() => delPayment(x.id)} title="Undo this payment" />
-                          </div>
-                        ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
+            <BudgetTab
+              people={people}
+              expenses={expenses}
+              currencies={currencies}
+              home={home}
+              fmt={fmt}
+              rateOf={rateOf}
+              activeIdx={activeIdx}
+              isActive={isActive}
+              totalHome={totalHome}
+              fundSpent={fundSpent}
+              fundLeft={fundLeft}
+              missingRate={missingRate}
+              meIdx={meIdx}
+              setData={setData}
+              updCur={updCur}
+              delCur={delCur}
+              expenseId={expenseId}
+              openExpense={openExpense}
+              closeExpense={closeHash}
+              openMember={openMember}
+              onSetPaid={setPaidMany}
+            />
           )}
 
-          {/* ═════════ PACKING ═════════ */}
+          {/* ═════════ BAWAAN ═════════ */}
           {!viewingMember && tab === "packing" && (
             <div className="space-y-4">
               <div className="bg-white rounded-xl border border-slate-200 p-4">
                 <div className="flex justify-between text-sm mb-2">
                   <span className="font-medium text-slate-600">
-                    Packed {packed} of {packing.length}
+                    {packed} dari {packing.length} udah masuk tas
                   </span>
                   <span className="font-semibold text-sky-600">{packing.length ? Math.round((packed / packing.length) * 100) : 0}%</span>
                 </div>
@@ -1104,8 +809,8 @@ export default function App() {
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
                       <TH className="w-12"></TH>
-                      <TH>Item</TH>
-                      <TH>Who brings it</TH>
+                      <TH>Barang</TH>
+                      <TH>Siapa yang bawa</TH>
                       <TH></TH>
                     </tr>
                   </thead>
@@ -1121,11 +826,11 @@ export default function App() {
                           </button>
                         </td>
                         <td className="px-1">
-                          <Cell value={r.item} onChange={(v) => upd("packing", i, "item", v)} className={`min-w-56 ${r.done ? "line-through text-slate-400" : "font-medium"}`} placeholder="Item" />
+                          <Cell value={r.item} onChange={(v) => upd("packing", i, "item", v)} className={`min-w-56 ${r.done ? "line-through text-slate-400" : "font-medium"}`} placeholder="Barang" />
                         </td>
                         <td className="px-3">
                           <Select value={r.who} onChange={(v) => upd("packing", i, "who", v)} className="bg-slate-100">
-                            <option value="Everyone">Everyone</option>
+                            <option value="Everyone">Semua orang</option>
                             {activeNames.map((name, j) => (
                               <option key={j} value={name}>
                                 {name}
@@ -1143,7 +848,7 @@ export default function App() {
                 </table>
               </div>
               <Btn color="bg-sky-500 hover:bg-sky-600" onClick={() => add("packing", { id: uid(), item: "", who: "Everyone", done: false })}>
-                <Plus size={16} /> Add item
+                <Plus size={16} /> Tambah barang
               </Btn>
             </div>
           )}

@@ -1,9 +1,18 @@
 "use client";
 
-import { ArrowLeft, Check } from "lucide-react";
-import { CATS, CAT_TINT, normCat, isFund, num, Avatar } from "./shared";
+import { useEffect, useState } from "react";
+import { ArrowLeft, Check, ChevronDown } from "lucide-react";
+import { CATS, CAT_LABEL, CAT_TINT, normCat, isFund, num, fmtDay, allShares, Avatar } from "./shared";
 
-const fmtDate = (ms) => (ms ? new Date(ms).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : "");
+const Box = ({ label, value, tone = "slate" }) => {
+  const tones = { slate: "bg-slate-50 text-slate-800", green: "bg-emerald-50 text-emerald-700", red: "bg-rose-50 text-rose-600" };
+  return (
+    <div className={`rounded-xl p-3 ${tones[tone]}`}>
+      <div className={`text-xs ${tone === "slate" ? "text-slate-500" : ""}`}>{label}</div>
+      <div className="text-lg font-semibold mt-0.5">{value}</div>
+    </div>
+  );
+};
 
 const Section = ({ title, right, children }) => (
   <section>
@@ -15,76 +24,102 @@ const Section = ({ title, right, children }) => (
   </section>
 );
 
-const Box = ({ label, value, sub, tone = "slate" }) => {
-  const tones = {
-    slate: "bg-slate-50 text-slate-800",
-    green: "bg-emerald-50 text-emerald-700",
-    red: "bg-rose-50 text-rose-600",
-  };
-  return (
-    <div className={`rounded-xl p-3 ${tones[tone]}`}>
-      <div className={`text-xs ${tone === "slate" ? "text-slate-500" : ""}`}>{label}</div>
-      <div className="text-lg font-semibold mt-0.5">{value}</div>
-      {sub && <div className={`text-xs mt-0.5 ${tone === "slate" ? "text-slate-400" : "opacity-80"}`}>{sub}</div>}
-    </div>
-  );
-};
+export default function MemberPage({ index, people, expenses, packing, monthLabels, curIdx, monthly, monthsOf, personTotal, fundShare, fmt, rateOf, homeEps, onSetPaid, onRename, onOpenMember, onOpenExpense, onBack }) {
+  const [showPaid, setShowPaid] = useState(false);
+  const [showAll, setShowAll] = useState(false);
+  const [undo, setUndo] = useState(null);
+  useEffect(() => {
+    if (!undo) return;
+    const t = setTimeout(() => setUndo(null), 6000);
+    return () => clearTimeout(t);
+  }, [undo]);
 
-export default function MemberPage({
-  index,
-  people,
-  expenses,
-  packing,
-  payments,
-  monthLabels,
-  curIdx,
-  monthly,
-  monthsOf,
-  personTotal,
-  fundShare,
-  fmt,
-  rateOf,
-  homeEps,
-  settleData,
-  onMarkPaid,
-  onDeletePayment,
-  onRename,
-  onOpenMember,
-  onBack,
-}) {
   const p = people[index];
-  const name = p.name || `Person ${index + 1}`;
-  const nameOf = (i) => people[i]?.name || "Someone";
+  const name = p.name || `Orang ${index + 1}`;
+  const nameOf = (i) => people[i]?.name || "Seseorang";
   const splitOf = (e) => e.split.filter((j) => j < people.length);
   const shareHome = (e) => {
     const s = splitOf(e);
     return s.includes(index) ? (num(e.amount) * rateOf(e.cur)) / s.length : 0;
   };
 
-  // ── numbers ──
+  // ── angka ──
   const saved = personTotal(p);
-  const tripCost = expenses.reduce((s, e) => s + shareHome(e), 0);
-  const paidOut = expenses.filter((e) => e.paidBy === index).reduce((s, e) => s + num(e.amount) * rateOf(e.cur), 0);
+  const myShare = expenses.reduce((s, e) => s + shareHome(e), 0);
   const fundBal = saved - fundShare[index];
   const byCat = CATS.map((c) => ({ c, v: expenses.filter((e) => normCat(e.cat) === c).reduce((s, e) => s + shareHome(e), 0) }))
     .filter((x) => x.v > 0)
     .sort((a, b) => b.v - a.v);
-  const theirExpenses = expenses.filter((e) => num(e.amount) > 0 && (splitOf(e).includes(index) || e.paidBy === index));
+  const theirExpenses = [...expenses].reverse().filter((e) => num(e.amount) > 0 && (splitOf(e).includes(index) || e.paidBy === index));
 
-  // ── settling ──
-  const pending = settleData.flatMap((g) => g.tr.filter((t) => t.from === index || t.to === index).map((t) => ({ ...t, g })));
-  const owes = pending.filter((t) => t.from === index).reduce((s, t) => s + t.amt * rateOf(t.g.fmtCode), 0);
-  const gets = pending.filter((t) => t.to === index).reduce((s, t) => s + t.amt * rateOf(t.g.fmtCode), 0);
-  const done = payments.filter((x) => x.from === index || x.to === index).sort((a, b) => (b.at || 0) - (a.at || 0));
+  // ── utang ──
+  const shares = allShares(expenses, people.length);
+  const open = shares.filter((s) => !s.paid);
+  const totalText = (items) => {
+    const t = {};
+    items.forEach((d) => (t[d.cur] = (t[d.cur] || 0) + d.amount));
+    return Object.entries(t)
+      .map(([c, a]) => fmt(a, c))
+      .join(" + ");
+  };
+  const group = (list, key) => {
+    const m = new Map();
+    list.forEach((d) => {
+      if (!m.has(d[key])) m.set(d[key], []);
+      m.get(d[key]).push(d);
+    });
+    return [...m.entries()].map(([other, items]) => ({ other, items, total: totalText(items) }));
+  };
+  const iPay = group(
+    open.filter((d) => d.from === index),
+    "to",
+  );
+  const theyPay = group(
+    open.filter((d) => d.to === index),
+    "from",
+  );
+  const paid = shares.filter((s) => s.paid && (s.from === index || s.to === index));
 
-  // ── packing ──
+  const payAll = (g) => {
+    const items = g.items.map((d) => ({ id: d.e.id, j: d.from }));
+    onSetPaid(items, true);
+    setUndo(items);
+  };
+  const markText = (d) => {
+    if (!d.mark) return "lunas dari sebelumnya";
+    const who = d.mark.by != null && people[d.mark.by] ? `ditandai ${people[d.mark.by].name}` : "ditandai";
+    return d.mark.at ? `${who}, ${fmtDay(d.mark.at)}` : who;
+  };
+
+  // ── bawaan ──
   const bringing = packing.filter((x) => x.who === p.name);
   const sharedItems = packing.filter((x) => x.who === "Everyone").length;
 
-  const NameBtn = ({ i }) => (
-    <button onClick={() => onOpenMember(i)} className="font-medium text-slate-800 hover:text-indigo-600 hover:underline underline-offset-2">
-      {nameOf(i)}
+  const PersonBtn = ({ i }) => (
+    <button onClick={() => onOpenMember(i)} className="inline-flex items-center gap-2 min-w-0 hover:text-indigo-600">
+      <Avatar name={people[i].name} i={i} photo={people[i].photo} size="w-6 h-6 text-xs" />
+      <span className="font-medium truncate">{people[i].name}</span>
     </button>
+  );
+
+  const DebtGroup = ({ g, out }) => (
+    <div className="px-3 py-3">
+      <div className="flex items-center gap-2 text-sm">
+        <PersonBtn i={g.other} />
+        <span className={`ml-auto font-semibold ${out ? "text-rose-600" : "text-emerald-700"}`}>{g.total}</span>
+        <button onClick={() => payAll(g)} className="text-xs font-medium text-emerald-700 border border-emerald-200 hover:bg-emerald-50 px-2.5 py-1 rounded-md">
+          Lunas
+        </button>
+      </div>
+      <div className="mt-1.5 ml-8 space-y-0.5">
+        {g.items.map((d) => (
+          <button key={`${d.e.id}-${d.from}`} onClick={() => onOpenExpense(d.e.id)} className="w-full flex justify-between gap-3 text-xs text-slate-500 hover:text-indigo-600">
+            <span className="truncate">{d.e.item || "Tanpa nama"}</span>
+            <span className="shrink-0">{fmt(d.amount, d.cur)}</span>
+          </button>
+        ))}
+      </div>
+    </div>
   );
 
   return (
@@ -92,7 +127,7 @@ export default function MemberPage({
       {/* Header */}
       <div>
         <button onClick={onBack} className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 hover:bg-slate-100 px-3 py-1.5 -ml-3 rounded-lg mb-3">
-          <ArrowLeft size={15} /> Back
+          <ArrowLeft size={15} /> Kembali
         </button>
         <div className="flex items-center gap-3">
           <Avatar name={p.name} i={index} photo={p.photo} size="w-12 h-12 text-lg" className={p.removed ? "grayscale opacity-60" : ""} />
@@ -102,138 +137,144 @@ export default function MemberPage({
             className="flex-1 min-w-0 text-2xl font-bold text-slate-800 bg-transparent px-2 py-1 rounded-md hover:bg-slate-100/70 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
           />
         </div>
+        {p.removed && <p className="text-xs text-slate-400 mt-2">Udah keluar dari trip</p>}
       </div>
 
-      {/* Summary */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Box label="Saved" value={fmt(saved)} sub="From the Save tab" />
-        <Box label={`Trip cost for ${name}`} value={fmt(tripCost)} sub="Their share of every expense" />
-        <Box label="Paid out of pocket" value={fmt(paidOut)} sub="Things they paid for" />
-        {Math.abs(fundBal) < homeEps ? (
-          <Box label="Group fund" value="Even" sub="Nothing left, nothing owed" />
-        ) : fundBal > 0 ? (
-          <Box tone="green" label="Left in group fund" value={`+${fmt(fundBal)}`} sub="Comes back to them at the end" />
-        ) : (
-          <Box tone="red" label="Group fund" value={`Top up ${fmt(-fundBal)}`} sub="Their share went past their savings" />
-        )}
+      {/* Ringkasan */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <Box label="Tabungan" value={fmt(saved)} />
+        <Box label={`Bagian ${name}`} value={fmt(myShare)} />
+        {Math.abs(fundBal) < homeEps ? <Box label="Kas" value="Pas" /> : fundBal > 0 ? <Box tone="green" label="Sisa di kas" value={`+${fmt(fundBal)}`} /> : <Box tone="red" label="Perlu nambah ke kas" value={fmt(-fundBal)} />}
       </div>
 
-      {/* To settle */}
-      <Section
-        title="To settle"
-        right={
-          (owes > homeEps || gets > homeEps) && (
-            <span className="text-xs text-slate-400">
-              {owes > homeEps && <>Owes {fmt(owes)}</>}
-              {owes > homeEps && gets > homeEps && " · "}
-              {gets > homeEps && <>Gets back {fmt(gets)}</>}
-            </span>
-          )
-        }
-      >
-        {pending.length === 0 ? (
-          <div className="text-sm text-slate-400 rounded-xl border border-dashed border-slate-200 px-4 py-4 text-center">{name} doesn't owe anyone and isn't owed anything right now ✓</div>
-        ) : (
-          <div className="rounded-xl border border-slate-200 divide-y divide-slate-100">
-            {pending.map((t, k) => (
-              <div key={k} className="flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2.5 text-sm">
-                {t.from === index ? (
-                  <>
-                    <span className="text-slate-500">Pays</span> <NameBtn i={t.to} />
-                  </>
-                ) : (
-                  <>
-                    <NameBtn i={t.from} /> <span className="text-slate-500">pays {name}</span>
-                  </>
-                )}
-                <span className={`ml-auto font-semibold ${t.from === index ? "text-rose-600" : "text-emerald-700"}`}>{fmt(t.amt, t.g.fmtCode)}</span>
-                <button onClick={() => onMarkPaid(t, t.g)} className="text-xs font-medium text-emerald-700 border border-emerald-200 hover:bg-emerald-50 px-2.5 py-1 rounded-md">
-                  Mark paid
-                </button>
+      {/* Utang */}
+      {iPay.length === 0 && theyPay.length === 0 ? (
+        <div className="text-sm text-slate-400 rounded-xl border border-dashed border-slate-200 px-4 py-4 text-center">Nggak ada utang</div>
+      ) : (
+        <div className="space-y-5">
+          {iPay.length > 0 && (
+            <Section title={`${name} bayar ke`}>
+              <div className="rounded-xl border border-slate-200 divide-y divide-slate-100">
+                {iPay.map((g) => (
+                  <DebtGroup key={g.other} g={g} out />
+                ))}
               </div>
-            ))}
-          </div>
-        )}
-        {done.length > 0 && (
-          <div className="mt-3">
-            <div className="text-xs text-slate-400 mb-1">Already paid</div>
-            <div className="divide-y divide-slate-100">
-              {done.map((x) => (
-                <div key={x.id} className="flex items-center gap-2 py-2 text-sm text-slate-500">
-                  <Check size={14} className="text-emerald-500 shrink-0" />
-                  <span>
-                    {x.from === index ? (
-                      <>
-                        Paid <NameBtn i={x.to} />
-                      </>
-                    ) : (
-                      <>
-                        <NameBtn i={x.from} /> paid {name}
-                      </>
-                    )}
-                  </span>
-                  <span className="text-xs text-slate-400">{fmtDate(x.at)}</span>
-                  <span className="ml-auto font-medium">{fmt(x.amount, x.cur)}</span>
-                  <button onClick={() => onDeletePayment(x.id)} className="text-xs text-slate-400 hover:text-rose-500 hover:bg-rose-50 px-2 py-1 rounded-md">
-                    Undo
-                  </button>
+            </Section>
+          )}
+          {theyPay.length > 0 && (
+            <Section title={`Bayar ke ${name}`}>
+              <div className="rounded-xl border border-slate-200 divide-y divide-slate-100">
+                {theyPay.map((g) => (
+                  <DebtGroup key={g.other} g={g} />
+                ))}
+              </div>
+            </Section>
+          )}
+        </div>
+      )}
+
+      {undo && (
+        <div className="flex items-center gap-3 text-sm bg-slate-800 text-white rounded-lg px-4 py-2.5 -mt-4">
+          <Check size={15} className="text-emerald-300" /> Ditandai lunas
+          <button
+            onClick={() => {
+              onSetPaid(undo, false);
+              setUndo(null);
+            }}
+            className="ml-auto font-medium text-amber-300 hover:text-amber-200"
+          >
+            Batalkan
+          </button>
+        </div>
+      )}
+
+      {paid.length > 0 && (
+        <div className="-mt-4">
+          <button onClick={() => setShowPaid((v) => !v)} className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700">
+            <Check size={14} className="text-emerald-500" /> {paid.length} udah lunas
+            <ChevronDown size={14} className={`transition ${showPaid ? "rotate-180" : ""}`} />
+          </button>
+          {showPaid && (
+            <div className="mt-2 divide-y divide-slate-100">
+              {paid.map((d) => (
+                <div key={`${d.e.id}-${d.from}`} className="flex items-center gap-2 py-2 text-sm text-slate-500">
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate">
+                      <span className="font-medium text-slate-700">{nameOf(d.from)}</span> ke <span className="font-medium text-slate-700">{nameOf(d.to)}</span>
+                      <button onClick={() => onOpenExpense(d.e.id)} className="ml-1.5 hover:text-indigo-600">
+                        · {d.e.item || "Tanpa nama"}
+                      </button>
+                    </div>
+                    <div className="text-[11px] text-slate-400">{markText(d)}</div>
+                  </div>
+                  <span className="shrink-0">{fmt(d.amount, d.cur)}</span>
+                  {d.mark && (
+                    <button
+                      onClick={() => {
+                        if (confirm(`${nameOf(d.from)} belum bayar?`)) onSetPaid([{ id: d.e.id, j: d.from }], false);
+                      }}
+                      className="text-xs text-slate-400 hover:text-rose-500 hover:bg-rose-50 px-2 py-1 rounded-md"
+                    >
+                      Batalkan
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
-          </div>
-        )}
-      </Section>
-
-      {/* Where their money went */}
-      <Section title={`Where ${name}'s money went`}>
-        {byCat.length === 0 ? (
-          <div className="text-sm text-slate-400">No expenses include {name} yet.</div>
-        ) : (
-          <div className="space-y-2">
-            {byCat.map(({ c, v }) => (
-              <div key={c} className="flex items-center gap-3 text-sm">
-                <span className={`text-xs font-medium px-2 py-0.5 rounded-md w-24 text-center ${CAT_TINT[c]}`}>{c}</span>
-                <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
-                  <div className="h-full bg-indigo-400 rounded-full" style={{ width: `${tripCost ? (v / tripCost) * 100 : 0}%` }} />
-                </div>
-                <span className="w-28 text-right font-medium">{fmt(v)}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </Section>
-
-      {/* Expense list */}
-      {theirExpenses.length > 0 && (
-        <Section title="Expenses" right={<span className="text-xs text-slate-400">{theirExpenses.length} total</span>}>
-          <div className="rounded-xl border border-slate-200 divide-y divide-slate-100">
-            {theirExpenses.map((e) => {
-              const s = splitOf(e);
-              const inSplit = s.includes(index);
-              const cat = normCat(e.cat);
-              const payer = isFund(e) ? "Paid from group fund" : e.paidBy === index ? `Paid by ${name}` : `Paid by ${nameOf(e.paidBy)}`;
-              return (
-                <div key={e.id} className={`flex items-center gap-3 px-3 py-2.5 ${e.settled ? "opacity-50" : ""}`}>
-                  <span className={`text-xs font-medium px-2 py-0.5 rounded-md shrink-0 ${CAT_TINT[cat]}`}>{cat}</span>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-medium text-slate-800 truncate">{e.item || "Untitled expense"}</div>
-                    <div className="text-xs text-slate-400 truncate">
-                      {payer} · {fmt(e.amount, e.cur)} total · split {s.length} way{s.length === 1 ? "" : "s"}
-                    </div>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <div className="text-sm font-semibold text-slate-700">{inSplit ? fmt(num(e.amount) / s.length, e.cur) : "—"}</div>
-                    <div className="text-[11px] text-slate-400">{inSplit ? "their share" : "paid for others"}</div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </Section>
+          )}
+        </div>
       )}
 
-      {/* Savings by month */}
-      <Section title="Savings by month" right={monthly > 0 && <span className="text-xs text-slate-400">Minimum {fmt(monthly)} / month</span>}>
+      {/* Pengeluaran */}
+      <Section title="Pengeluaran">
+        {byCat.length === 0 ? (
+          <div className="text-sm text-slate-400">Belum ada pengeluaran yang melibatkan {name}.</div>
+        ) : (
+          <>
+            <div className="space-y-2">
+              {byCat.map(({ c, v }) => (
+                <div key={c} className="flex items-center gap-3 text-sm">
+                  <span className={`text-xs font-medium px-2 py-0.5 rounded-md w-28 text-center ${CAT_TINT[c]}`}>{CAT_LABEL[c]}</span>
+                  <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden">
+                    <div className="h-full bg-indigo-400 rounded-full" style={{ width: `${myShare ? (v / myShare) * 100 : 0}%` }} />
+                  </div>
+                  <span className="w-28 text-right font-medium">{fmt(v)}</span>
+                </div>
+              ))}
+            </div>
+            <button onClick={() => setShowAll((v) => !v)} className="inline-flex items-center gap-1 text-sm text-indigo-600 hover:text-indigo-700 mt-3">
+              {showAll ? "Sembunyikan" : `Lihat semua (${theirExpenses.length})`}
+              <ChevronDown size={14} className={`transition ${showAll ? "rotate-180" : ""}`} />
+            </button>
+            {showAll && (
+              <div className="rounded-xl border border-slate-200 divide-y divide-slate-100 mt-2">
+                {theirExpenses.map((e) => {
+                  const s = splitOf(e);
+                  const inSplit = s.includes(index);
+                  const payer = isFund(e) ? "Pakai kas" : e.paidBy === index ? `${name} yang bayar` : `${nameOf(e.paidBy)} yang bayar`;
+                  return (
+                    <button key={e.id} onClick={() => onOpenExpense(e.id)} className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-slate-50">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-medium text-slate-800 truncate">{e.item || "Tanpa nama"}</div>
+                        <div className="text-xs text-slate-400 truncate">
+                          {payer}, total {fmt(e.amount, e.cur)}
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <div className="text-sm font-semibold text-slate-700">{inSplit ? fmt(num(e.amount) / s.length, e.cur) : "–"}</div>
+                        <div className="text-[11px] text-slate-400">{inSplit ? "bagiannya" : "nalangin"}</div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </>
+        )}
+      </Section>
+
+      {/* Tabungan per bulan */}
+      <Section title="Tabungan per bulan" right={monthly > 0 && <span className="text-xs text-slate-400">Minimal {fmt(monthly)}/bulan</span>}>
         <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
           {monthsOf(p).map((v, k) => {
             const amt = num(v);
@@ -249,29 +290,25 @@ export default function MemberPage({
                 <div className="text-[11px] opacity-80">
                   {monthLabels[k].short} '{monthLabels[k].year}
                 </div>
-                <div className="text-sm font-semibold">{amt > 0 ? fmt(amt) : state === "missed" ? "Missed" : "–"}</div>
+                <div className="text-sm font-semibold">{amt > 0 ? fmt(amt) : state === "missed" ? "Bolong" : "–"}</div>
               </div>
             );
           })}
         </div>
       </Section>
 
-      {/* Bringing */}
-      <Section title="Bringing">
+      {/* Bawaan */}
+      <Section title="Bawaan">
         {bringing.length === 0 ? (
-          <div className="text-sm text-slate-400">Nothing assigned yet{sharedItems ? `, plus ${sharedItems} item${sharedItems === 1 ? "" : "s"} everyone brings` : ""}.</div>
+          <div className="text-sm text-slate-400">Belum ada{sharedItems ? `, selain ${sharedItems} barang yang dibawa semua orang` : ""}.</div>
         ) : (
           <div className="flex flex-wrap gap-2">
             {bringing.map((x) => (
               <span key={x.id || x.item} className={`text-sm px-3 py-1 rounded-full ${x.done ? "bg-sky-50 text-sky-700 line-through" : "bg-slate-100 text-slate-700"}`}>
-                {x.item || "Unnamed item"}
+                {x.item || "Tanpa nama"}
               </span>
             ))}
-            {sharedItems > 0 && (
-              <span className="text-sm text-slate-400 px-1 py-1">
-                + {sharedItems} item{sharedItems === 1 ? "" : "s"} everyone brings
-              </span>
-            )}
+            {sharedItems > 0 && <span className="text-sm text-slate-400 px-1 py-1">+ {sharedItems} barang bareng</span>}
           </div>
         )}
       </Section>
