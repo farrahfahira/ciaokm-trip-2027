@@ -3,7 +3,7 @@ export const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const hasIds = (arr) => arr.every((x) => isObj(x) && x.id != null);
 
 // Arrays that behave like sets (order doesn't matter, no duplicates).
-const SET_KEYS = new Set(["split", "likes"]);
+const SET_KEYS = new Set(["split", "likes", "who"]);
 
 // Three-way merge: base = the last copy both sides agreed on.
 export function merge3(base, local, remote, key) {

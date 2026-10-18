@@ -1,20 +1,22 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Plus, Trash2, RotateCcw, MapPin, Calendar, PiggyBank, CalendarDays, Wallet, Luggage, Check, ExternalLink, Link2, Lightbulb, Users, History as HistoryIcon } from "lucide-react";
+import { Plus, Trash2, MapPin, Calendar, PiggyBank, CalendarDays, Wallet, Luggage, ExternalLink, Link2, Lightbulb, Users, History as HistoryIcon } from "lucide-react";
 import { useSharedTrip } from "./useSharedTrip";
 import IdeasTab from "./IdeasTab";
 import HistoryPanel from "./HistoryPanel";
 import MemberPage from "./MemberPage";
 import ManagePanel from "./ManagePanel";
 import BudgetTab from "./BudgetTab";
-import { ItineraryMobile, SaveMobile, PackingMobile } from "./MobileViews";
+import PackingTab from "./PackingTab";
+import { ItineraryMobile, SaveMobile } from "./MobileViews";
 import { NO_DECIMALS, FUND, num, isFund, normCat, Avatar, MoneyInput } from "./shared";
 
 const ME_KEY = "trip-planner-me";
 const DAY_TINT = ["bg-indigo-100 text-indigo-700", "bg-emerald-100 text-emerald-700", "bg-amber-100 text-amber-700", "bg-rose-100 text-rose-700", "bg-sky-100 text-sky-700", "bg-violet-100 text-violet-700"];
 const DEFAULT_MONTHS = 12;
 const MAX_MONTHS = 60;
+const PACK_KEYS = ["docs", "clothes", "toiletries", "electronics", "meds", "food", "other"];
 
 const uid = () => Math.random().toString(36).slice(2, 9);
 const blankMonths = () => Array(DEFAULT_MONTHS).fill("");
@@ -59,9 +61,9 @@ const defaults = () => {
     ],
     expenses: [],
     packing: [
-      { id: "pk-0", item: "Paspor", who: "Everyone", done: false },
-      { id: "pk-1", item: "Charger HP", who: "Everyone", done: false },
-      { id: "pk-2", item: "Power bank", who: "Orang 1", done: false },
+      { id: "pk-0", item: "Paspor", type: "personal", who: "all", cat: "docs", done: {} },
+      { id: "pk-1", item: "Charger HP", type: "personal", who: "all", cat: "electronics", done: {} },
+      { id: "pk-2", item: "Power bank", type: "shared", who: [0], cat: "electronics", done: {} },
     ],
     ideas: [],
     ideaCities: [],
@@ -124,7 +126,27 @@ const migrate = (s) => {
   });
   delete out.payments;
   delete out.trip.settleMode;
-  out.packing = (s.packing || d.packing).map((p, i) => ({ ...p, id: p.id || `pk-${i}` }));
+  // Bawaan: format lama (who = nama / "Everyone") → Pribadi/Bersama, terhubung ke orangnya
+  out.packing = (s.packing || d.packing).map((p, i) => {
+    const id = p.id || `pk-${i}`;
+    if (p.type) {
+      return {
+        ...p,
+        id,
+        cat: PACK_KEYS.includes(p.cat) ? p.cat : "",
+        who: p.who === "all" ? "all" : Array.isArray(p.who) ? p.who : [],
+        done: p.done && typeof p.done === "object" ? p.done : {},
+      };
+    }
+    const base = { id, item: p.item || "", cat: "", done: {} };
+    if (!p.who || p.who === "Everyone") return { ...base, type: "personal", who: "all" };
+    let idx = out.people.findIndex((x) => x.name === p.who);
+    if (idx < 0) {
+      const m = String(p.who).match(/^(?:Person|Orang)\s+(\d+)$/i);
+      if (m && Number(m[1]) - 1 < out.people.length) idx = Number(m[1]) - 1;
+    }
+    return { ...base, type: "shared", who: idx >= 0 ? [idx] : [], done: idx >= 0 && p.done === true ? { [idx]: true } : {} };
+  });
   out.ideas = (Array.isArray(s.ideas) ? s.ideas : []).map((x) => {
     const { link, ...rest } = x;
     const links = Array.isArray(x.links) ? x.links : link ? [{ id: `${x.id}-l0`, url: link }] : [];
@@ -170,12 +192,6 @@ const Del = ({ onClick, title = "Hapus" }) => (
   </button>
 );
 
-const Select = ({ value, onChange, children, className = "" }) => (
-  <select value={value} onChange={(e) => onChange(e.target.value)} className={`text-sm rounded-md px-2 py-1.5 border-0 focus:outline-none focus:ring-2 focus:ring-indigo-300 cursor-pointer ${className}`}>
-    {children}
-  </select>
-);
-
 const STATUS_TEXT = {
   loading: "",
   saving: "Menyimpan…",
@@ -218,6 +234,11 @@ export default function App() {
     const v = localStorage.getItem(ME_KEY);
     setMeIdx(v !== null && v !== "" ? Number(v) : null);
   }, [tab, memberIdx]);
+  const setMe = (v) => {
+    if (v === null) localStorage.removeItem(ME_KEY);
+    else localStorage.setItem(ME_KEY, String(v));
+    setMeIdx(v);
+  };
   const openHash = (h) => {
     hashDepth.current += 1;
     window.location.hash = h;
@@ -240,10 +261,7 @@ export default function App() {
   const viewingMember = memberIdx !== null && memberIdx < people.length;
 
   const activeIdx = people.map((_, i) => i).filter((i) => !people[i].removed);
-  const activeCount = Math.max(1, activeIdx.length);
   const isActive = (i) => !!people[i] && !people[i].removed;
-  const activeNames = activeIdx.map((i) => people[i].name);
-  const meName = meIdx !== null && isActive(meIdx) ? people[meIdx].name : null;
 
   const goTab = (id) => {
     setTab(id);
@@ -254,12 +272,7 @@ export default function App() {
   // ── updater umum ──
   const setTrip = (f, v) => setData((d) => ({ ...d, trip: { ...d.trip, [f]: v } }));
   const upd = (k, i, f, v) => setData((d) => ({ ...d, [k]: d[k].map((r, j) => (j === i ? { ...r, [f]: v } : r)) }));
-  const add = (k, row) => setData((d) => ({ ...d, [k]: [...d[k], row] }));
-  const del = (k, i) => setData((d) => ({ ...d, [k]: d[k].filter((_, j) => j !== i) }));
   const setPacking = (fn) => setData((d) => ({ ...d, packing: fn(d.packing) }));
-  const reset = () => {
-    if (confirm("Reset semua ke awal? Ini ngehapus data buat semua orang.\n\nTenang, ada backup otomatis, bisa dibalikin dari Riwayat.")) setData(defaults(), { reason: "reset" });
-  };
   const restore = (snapshot) => setData(migrate(snapshot), { reason: "restore" });
 
   // ── tanda lunas: [{ id: pengeluaran, j: orang }] ──
@@ -356,7 +369,6 @@ export default function App() {
     const d = new Date(sy, sm - 1 + k, 1);
     return { short: d.toLocaleString("id-ID", { month: "short" }), year: String(d.getFullYear()).slice(2) };
   });
-  const firstLabel = `${monthLabels[0].short} ${monthLabels[0].year}`;
   const lastLabel = `${monthLabels[nMonths - 1].short} ${monthLabels[nMonths - 1].year}`;
   const now = new Date();
   const curIdx = (now.getFullYear() - sy) * 12 + now.getMonth() - (sm - 1);
@@ -395,8 +407,6 @@ export default function App() {
     split.forEach((i) => (fundShare[i] += each));
   });
   const homeEps = decOf(home.code) === 0 ? 0.5 : 0.005;
-
-  const packed = packing.filter((p) => p.done).length;
 
   const tabs = [
     { id: "save", label: "Nabung", Icon: PiggyBank, on: "text-emerald-600 border-emerald-500" },
@@ -546,9 +556,6 @@ export default function App() {
                     <Cell type="number" value={trip.monthly} onChange={(v) => setTrip("monthly", v)} className="w-32" placeholder="Belum ditentukan" />
                   </div>
                 </label>
-                <span className="text-xs text-slate-400">
-                  {nMonths} bulan, {firstLabel} – {lastLabel}
-                </span>
                 {endBeforeStart && <span className="text-xs text-rose-500 w-full">Bulan berhenti ada sebelum bulan mulai.</span>}
               </div>
 
@@ -610,7 +617,7 @@ export default function App() {
                           {monthsOf(p).map((v, k) => (
                             <td key={k} className={`p-0.5 ${k === curIdx ? "bg-emerald-50/50" : ""}`}>
                               <div className={`rounded-md ${cellTint(v, k)}`}>
-                                <Cell type="number" value={v} onChange={(nv) => updMonth(i, k, nv)} className="w-20 text-center hover:bg-transparent" placeholder="–" />
+                                <Cell type="number" value={v} onChange={(nv) => updMonth(i, k, nv)} className="w-24 text-center hover:bg-transparent" placeholder="–" />
                               </div>
                             </td>
                           ))}
@@ -790,70 +797,7 @@ export default function App() {
           )}
 
           {/* ═════════ BAWAAN ═════════ */}
-          {!viewingMember && tab === "packing" && (
-            <div className="space-y-4">
-              <div className="bg-white rounded-xl border border-slate-200 p-4">
-                <div className="flex justify-between text-sm mb-2">
-                  <span className="font-medium text-slate-600">
-                    {packed} dari {packing.length} udah masuk tas
-                  </span>
-                  <span className="font-semibold text-sky-600">{packing.length ? Math.round((packed / packing.length) * 100) : 0}%</span>
-                </div>
-                <Bar pct={packing.length ? (packed / packing.length) * 100 : 0} color="bg-sky-500" />
-              </div>
-
-              <div className="md:hidden">
-                <PackingMobile packing={packing} setPacking={setPacking} activeNames={activeNames} meName={meName} />
-              </div>
-
-              <div className="hidden md:block bg-white rounded-xl border border-slate-200 overflow-x-auto">
-                <table className="w-full min-w-max">
-                  <thead className="bg-slate-50 border-b border-slate-200">
-                    <tr>
-                      <TH className="w-12"></TH>
-                      <TH>Barang</TH>
-                      <TH>Siapa yang bawa</TH>
-                      <TH></TH>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {packing.map((r, i) => (
-                      <tr key={r.id || i} className="hover:bg-slate-50/60">
-                        <td className="px-3 py-1.5">
-                          <button
-                            onClick={() => upd("packing", i, "done", !r.done)}
-                            className={`w-5 h-5 rounded border-2 flex items-center justify-center transition ${r.done ? "bg-sky-500 border-sky-500 text-white" : "border-slate-300 hover:border-sky-400"}`}
-                          >
-                            {r.done && <Check size={13} strokeWidth={3} />}
-                          </button>
-                        </td>
-                        <td className="px-1">
-                          <Cell value={r.item} onChange={(v) => upd("packing", i, "item", v)} className={`min-w-56 ${r.done ? "line-through text-slate-400" : "font-medium"}`} placeholder="Barang" />
-                        </td>
-                        <td className="px-3">
-                          <Select value={r.who} onChange={(v) => upd("packing", i, "who", v)} className="bg-slate-100">
-                            <option value="Everyone">Semua orang</option>
-                            {activeNames.map((name, j) => (
-                              <option key={j} value={name}>
-                                {name}
-                              </option>
-                            ))}
-                            {r.who !== "Everyone" && !activeNames.includes(r.who) && <option value={r.who}>{r.who}</option>}
-                          </Select>
-                        </td>
-                        <td className="px-2">
-                          <Del onClick={() => del("packing", i)} />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <Btn className="hidden md:inline-flex" color="bg-sky-500 hover:bg-sky-600" onClick={() => add("packing", { id: uid(), item: "", who: "Everyone", done: false })}>
-                <Plus size={16} /> Tambah barang
-              </Btn>
-            </div>
-          )}
+          {!viewingMember && tab === "packing" && <PackingTab people={people} activeIdx={activeIdx} isActive={isActive} packing={packing} setPacking={setPacking} meIdx={meIdx} setMe={setMe} />}
         </div>
       </div>
 
