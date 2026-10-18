@@ -8,6 +8,7 @@ import HistoryPanel from "./HistoryPanel";
 import MemberPage from "./MemberPage";
 import ManagePanel from "./ManagePanel";
 import BudgetTab from "./BudgetTab";
+import { ItineraryMobile, SaveMobile, PackingMobile } from "./MobileViews";
 import { NO_DECIMALS, FUND, num, isFund, normCat, Avatar } from "./shared";
 
 const ME_KEY = "trip-planner-me";
@@ -104,7 +105,7 @@ const migrate = (s) => {
     settled: !!e.settled,
     paid: e.paid && typeof e.paid === "object" ? { ...e.paid } : {},
   }));
-  // Pembayaran dari sistem lama ("Mark paid") → tandai lunas pengeluaran yang cocok, mulai dari yang paling lama
+  // Pembayaran dari sistem lama → tandai lunas pengeluaran yang cocok, mulai dari yang paling lama
   const rate = (code) => {
     if (code === out.currencies[0].code) return 1;
     const c = out.currencies.find((x) => x.code === code);
@@ -161,8 +162,8 @@ const Stat = ({ label, value, accent, sub }) => (
 
 const TH = ({ children, className = "" }) => <th className={`px-3 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide ${className}`}>{children}</th>;
 
-const Btn = ({ onClick, children, color }) => (
-  <button onClick={onClick} className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-medium text-white ${color} transition`}>
+const Btn = ({ onClick, children, color, className = "" }) => (
+  <button onClick={onClick} className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-medium text-white ${color} transition ${className}`}>
     {children}
   </button>
 );
@@ -188,7 +189,6 @@ const STATUS_TEXT = {
 };
 
 export default function App() {
-  // ── Data bareng: semua yang punya link lihat & ubah data yang sama ──
   const { trip: data, update: setData, status, ready } = useSharedTrip(defaults, migrate);
   const [tab, setTab] = useState("itinerary");
   const [linkEdit, setLinkEdit] = useState(null);
@@ -218,7 +218,6 @@ export default function App() {
   useEffect(() => {
     if (memberIdx !== null || expenseId) window.scrollTo({ top: 0 });
   }, [memberIdx, expenseId]);
-  // Nama "Aku…" yang dipilih di HP ini (dipakai buat "Ditandai …")
   useEffect(() => {
     const v = localStorage.getItem(ME_KEY);
     setMeIdx(v !== null && v !== "" ? Number(v) : null);
@@ -244,17 +243,24 @@ export default function App() {
   const home = currencies[0];
   const viewingMember = memberIdx !== null && memberIdx < people.length;
 
-  // Anggota yang keluar tetap ada di data (biar hitungan uang tetap benar), cuma disembunyikan
   const activeIdx = people.map((_, i) => i).filter((i) => !people[i].removed);
   const activeCount = Math.max(1, activeIdx.length);
   const isActive = (i) => !!people[i] && !people[i].removed;
   const activeNames = activeIdx.map((i) => people[i].name);
+  const meName = meIdx !== null && isActive(meIdx) ? people[meIdx].name : null;
+
+  const goTab = (id) => {
+    setTab(id);
+    if (viewingMember || expenseId) closeHash();
+    window.scrollTo({ top: 0 });
+  };
 
   // ── updater umum ──
   const setTrip = (f, v) => setData((d) => ({ ...d, trip: { ...d.trip, [f]: v } }));
   const upd = (k, i, f, v) => setData((d) => ({ ...d, [k]: d[k].map((r, j) => (j === i ? { ...r, [f]: v } : r)) }));
   const add = (k, row) => setData((d) => ({ ...d, [k]: [...d[k], row] }));
   const del = (k, i) => setData((d) => ({ ...d, [k]: d[k].filter((_, j) => j !== i) }));
+  const setPacking = (fn) => setData((d) => ({ ...d, packing: fn(d.packing) }));
   const reset = () => {
     if (confirm("Reset semua ke awal? Ini ngehapus data buat semua orang.\n\nTenang, ada backup otomatis, bisa dibalikin dari Riwayat.")) setData(defaults(), { reason: "reset" });
   };
@@ -283,7 +289,7 @@ export default function App() {
       alert("Minimal harus ada satu anggota.");
       return;
     }
-    if (!confirm(`Keluarin ${people[i].name} dari trip?\n\nTabungan dan pengeluarannya tetap tercatat, jadi hitungan uang nggak berubah. Bisa dibalikin kapan aja dari Atur.`)) return;
+    if (!confirm(`Keluarin ${people[i].name} dari trip?\n\nTabungan dan pengeluarannya tetap tercatat. Bisa dibalikin dari Atur.`)) return;
     upd("people", i, "removed", true);
   };
   const restorePerson = (i) => upd("people", i, "removed", false);
@@ -358,7 +364,7 @@ export default function App() {
   const lastLabel = `${monthLabels[nMonths - 1].short} ${monthLabels[nMonths - 1].year}`;
   const now = new Date();
   const curIdx = (now.getFullYear() - sy) * 12 + now.getMonth() - (sm - 1);
-  const monthly = num(trip.monthly); // minimal per orang per bulan
+  const monthly = num(trip.monthly);
   const monthsOf = (p) => Array.from({ length: nMonths }, (_, k) => p.months[k] ?? "");
   const personTotal = (p) => monthsOf(p).reduce((s, v) => s + num(v), 0);
   const monthTotal = (k) => people.reduce((s, p) => s + num(p.months[k]), 0);
@@ -381,7 +387,7 @@ export default function App() {
   const totalHome = expenses.reduce((s, e) => s + num(e.amount) * rateOf(e.cur), 0);
   const missingRate = currencies.slice(1).some((c) => !num(c.rate));
 
-  // ── kas (semua dalam mata uang utama, sama kayak tab Nabung) ──
+  // ── kas ──
   const fundExpenses = expenses.filter((e) => isFund(e) && num(e.amount) > 0);
   const fundSpent = fundExpenses.reduce((s, e) => s + num(e.amount) * rateOf(e.cur), 0);
   const fundLeft = totalSaved - fundSpent;
@@ -409,15 +415,15 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-700 p-4 md:p-8">
+    <div className="min-h-screen bg-slate-50 text-slate-700 px-4 pt-4 pb-28 md:p-8">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
           <div className="h-1.5 bg-gradient-to-r from-rose-400 via-amber-400 to-indigo-500" />
-          <div className="p-5 md:p-6">
-            <div className="flex items-start justify-between gap-4">
+          <div className="p-4 md:p-6">
+            <div className="flex items-start justify-between gap-3">
               <Cell value={trip.name} onChange={(v) => setTrip("name", v)} className="text-2xl md:text-3xl font-bold text-slate-800 -ml-2" />
-              {countdown && <span className="shrink-0 bg-indigo-50 text-indigo-700 text-sm font-medium px-3 py-1.5 rounded-full">{countdown}</span>}
+              {countdown && <span className="shrink-0 bg-indigo-50 text-indigo-700 text-xs md:text-sm font-medium px-3 py-1.5 rounded-full">{countdown}</span>}
             </div>
             <div className="flex flex-wrap gap-2 mt-3 text-sm">
               <label className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-lg pl-2.5">
@@ -435,14 +441,14 @@ export default function App() {
               <div className="flex -space-x-1.5">
                 {activeIdx.map((i) => (
                   <button key={people[i].id || i} onClick={() => openMember(i)} title={people[i].name} className={`rounded-full ring-2 hover:z-10 hover:scale-110 transition ${memberIdx === i ? "ring-indigo-400 z-10" : "ring-white"}`}>
-                    <Avatar name={people[i].name} i={i} photo={people[i].photo} />
+                    <Avatar name={people[i].name} i={i} photo={people[i].photo} size="w-8 h-8 text-xs md:w-7 md:h-7" />
                   </button>
                 ))}
               </div>
               <span className="text-sm text-slate-500 ml-3">{activeIdx.length} anggota</span>
               <button
                 onClick={() => setShowManage((v) => !v)}
-                className={`ml-3 inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg transition ${showManage ? "bg-indigo-100 text-indigo-700" : "text-indigo-600 hover:bg-indigo-50"}`}
+                className={`ml-2 inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg transition ${showManage ? "bg-indigo-100 text-indigo-700" : "text-indigo-600 hover:bg-indigo-50"}`}
               >
                 <Users size={14} /> Atur
               </button>
@@ -450,34 +456,31 @@ export default function App() {
           </div>
         </div>
 
-        {/* Tab */}
-        <div className="flex items-end justify-between mt-6 border-b border-slate-200">
-          <div className="flex gap-1 overflow-x-auto">
+        {/* Tab (laptop) + status */}
+        <div className="flex items-end justify-between mt-4 md:mt-6 md:border-b border-slate-200">
+          <div className="hidden md:flex gap-1">
             {tabs.map(({ id, label, Icon, on }) => (
               <button
                 key={id}
-                onClick={() => {
-                  setTab(id);
-                  if (viewingMember || expenseId) closeHash();
-                }}
+                onClick={() => goTab(id)}
                 className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition ${tab === id && !viewingMember ? on : "border-transparent text-slate-500 hover:text-slate-700"}`}
               >
                 <Icon size={16} /> {label}
               </button>
             ))}
           </div>
-          <div className="flex items-center gap-3 pb-2 shrink-0">
-            <span className={`text-xs hidden sm:inline ${status === "error" ? "text-rose-500" : "text-slate-400"}`}>{STATUS_TEXT[status]}</span>
-            <button onClick={() => setShowHistory((v) => !v)} title="Riwayat" className={`p-1.5 rounded-md hover:text-slate-600 hover:bg-slate-100 ${showHistory ? "text-slate-700 bg-slate-100" : "text-slate-400"}`}>
-              <HistoryIcon size={15} />
+          <div className="flex items-center gap-2 md:pb-2 ml-auto">
+            <span className={`text-xs ${status === "error" ? "text-rose-500" : "text-slate-400"}`}>{STATUS_TEXT[status]}</span>
+            <button onClick={() => setShowHistory((v) => !v)} title="Riwayat" className={`p-2 md:p-1.5 rounded-md hover:text-slate-600 hover:bg-slate-100 ${showHistory ? "text-slate-700 bg-slate-100" : "text-slate-400"}`}>
+              <HistoryIcon size={16} />
             </button>
-            <button onClick={reset} title="Reset" className="p-1.5 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100">
-              <RotateCcw size={15} />
+            <button onClick={reset} title="Reset" className="p-2 md:p-1.5 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100">
+              <RotateCcw size={16} />
             </button>
           </div>
         </div>
 
-        <div className="mt-5">
+        <div className="mt-3 md:mt-5">
           {showManage && (
             <ManagePanel
               people={people}
@@ -523,7 +526,7 @@ export default function App() {
           {!viewingMember && tab === "save" && (
             <div className="space-y-4">
               <div className="bg-white rounded-xl border border-slate-200 p-4 flex flex-wrap gap-x-6 gap-y-3 items-center">
-                <label className="flex items-center gap-2 text-sm">
+                <label className="flex items-center justify-between md:justify-start gap-2 text-sm w-full md:w-auto">
                   <span className="text-slate-500 font-medium">Mulai nabung</span>
                   <input
                     type="month"
@@ -532,7 +535,7 @@ export default function App() {
                     className="text-sm bg-slate-50 border border-slate-200 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-300"
                   />
                 </label>
-                <label className="flex items-center gap-2 text-sm">
+                <label className="flex items-center justify-between md:justify-start gap-2 text-sm w-full md:w-auto">
                   <span className="text-slate-500 font-medium">Berhenti nabung</span>
                   <input
                     type="month"
@@ -543,8 +546,8 @@ export default function App() {
                     className={`text-sm bg-slate-50 border rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-300 ${endBeforeStart ? "border-rose-300" : "border-slate-200"}`}
                   />
                 </label>
-                <label className="flex items-center gap-2 text-sm">
-                  <span className="text-slate-500 font-medium">Minimal per orang / bulan</span>
+                <label className="flex items-center justify-between md:justify-start gap-2 text-sm w-full md:w-auto">
+                  <span className="text-slate-500 font-medium">Minimal / bulan</span>
                   <div className="flex items-center bg-slate-50 border border-slate-200 rounded-md pl-2">
                     <span className="text-slate-400">{home.symbol}</span>
                     <Cell type="number" value={trip.monthly} onChange={(v) => setTrip("monthly", v)} className="w-32" placeholder="Belum ditentukan" />
@@ -557,14 +560,14 @@ export default function App() {
               </div>
 
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <Stat label="Total tabungan" value={fmt(totalSaved)} accent="bg-emerald-500" sub={`Rata-rata ${fmt(totalSaved / activeCount)} per orang`} />
+                <Stat label="Total tabungan" value={fmt(totalSaved)} accent="bg-emerald-500" sub={`Rata-rata ${fmt(totalSaved / activeCount)}`} />
                 <Stat
                   label={curLabel ? `Terkumpul ${curLabel}` : "Bulan ini"}
                   value={curLabel ? fmt(monthTotal(curIdx)) : "–"}
                   accent="bg-teal-500"
-                  sub={curLabel ? `${paidThisMonth} dari ${activeIdx.length} udah setor` : curIdx < 0 ? "Belum mulai" : "Periode nabung udah selesai"}
+                  sub={curLabel ? `${paidThisMonth} dari ${activeIdx.length} udah setor` : curIdx < 0 ? "Belum mulai" : "Periode udah selesai"}
                 />
-                <Stat label="Target minimal" value={monthly ? fmt(groupTarget) : "Belum diatur"} accent="bg-amber-400" sub={monthly ? `${fmt(monthly * nMonths)} per orang` : "Isi minimal per bulan dulu"} />
+                <Stat label="Target minimal" value={monthly ? fmt(groupTarget) : "Belum diatur"} accent="bg-amber-400" sub={monthly ? `${fmt(monthly * nMonths)} per orang` : null} />
                 <Stat label="Sisa bulan" value={monthsLeft} accent="bg-indigo-400" sub={curLabel ? `Bulan ke-${curIdx + 1} dari ${nMonths}` : null} />
               </div>
 
@@ -578,7 +581,13 @@ export default function App() {
                 </div>
               )}
 
-              <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
+              {/* HP */}
+              <div className="md:hidden">
+                <SaveMobile people={people} activeIdx={activeIdx} monthLabels={monthLabels} curIdx={curIdx} monthly={monthly} monthsOf={monthsOf} personTotal={personTotal} updMonth={updMonth} fmt={fmt} />
+              </div>
+
+              {/* Laptop */}
+              <div className="hidden md:block bg-white rounded-xl border border-slate-200 overflow-x-auto">
                 <table className="w-full min-w-max border-collapse">
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
@@ -637,14 +646,11 @@ export default function App() {
                 </span>
                 {monthly > 0 && (
                   <span className="flex items-center gap-1.5">
-                    <span className="w-3 h-3 rounded bg-amber-100 border border-amber-200" /> Kurang dari {fmt(monthly)}
+                    <span className="w-3 h-3 rounded bg-amber-100 border border-amber-200" /> Kurang dari minimal
                   </span>
                 )}
                 <span className="flex items-center gap-1.5">
                   <span className="w-3 h-3 rounded bg-rose-100 border border-rose-200" /> Bolong
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <span className="w-3 h-3 rounded bg-emerald-200" /> Bulan ini
                 </span>
               </div>
               {removedSaved > 0 && (
@@ -661,108 +667,106 @@ export default function App() {
 
           {/* ═════════ ITINERARY ═════════ */}
           {!viewingMember && tab === "itinerary" && (
-            <div>
-              <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
-                <table className="w-full min-w-max border-collapse">
-                  <thead className="bg-slate-800 text-white">
-                    <tr>
-                      <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide w-48">Hari</th>
-                      <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide">Jam</th>
-                      <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide">Tempat</th>
-                      <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide">Kegiatan</th>
-                      <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide">Kira-kira harga</th>
-                      <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide bg-amber-500">Catatan</th>
-                      <th className="w-10" />
-                    </tr>
-                  </thead>
-                  {days.map((day, di) => (
-                    <tbody key={day.id} className={`border-t-2 border-slate-200 ${di % 2 ? "bg-slate-50/70" : "bg-white"}`}>
-                      {[...day.rows, null].map((r, ri) => (
-                        <tr key={r ? r.id : "add"} className={r ? "border-t border-slate-100 group" : ""}>
-                          {ri === 0 && (
-                            <td rowSpan={day.rows.length + 1} className="align-top px-3 py-3 border-r border-slate-200">
-                              <div className="flex items-center justify-between">
-                                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${DAY_TINT[di % DAY_TINT.length]}`}>Hari {di + 1}</span>
-                                <Del onClick={() => delDay(di)} title="Hapus hari" />
-                              </div>
-                              {day.date && <div className="text-base font-semibold text-slate-800 mt-2 px-2 capitalize">{weekday(day.date)}</div>}
-                              <Cell type="date" value={day.date} onChange={(v) => updDay(di, "date", v)} className="text-slate-500 w-40" />
-                              <Cell value={day.label} onChange={(v) => updDay(di, "label", v)} className="text-xs text-slate-500" placeholder="Judul (opsional)" />
-                              <div className="text-xs text-slate-400 px-2 mt-1">{day.rows.length} tempat</div>
-                            </td>
-                          )}
-                          {r ? (
-                            <>
-                              <td className="px-1 py-0.5 align-top">
-                                <Cell value={r.time} onChange={(v) => updRow(di, ri, "time", v)} className="w-32 tabular-nums" placeholder="11.00 - 13.30" />
-                              </td>
-                              <td className="px-1 py-0.5 align-top min-w-56">
-                                <div className="flex items-center gap-0.5">
-                                  <Cell value={r.place} onChange={(v) => updRow(di, ri, "place", v)} className={r.link ? "text-indigo-600 underline underline-offset-2" : ""} placeholder="Tempat" />
-                                  {r.link && isUrl(r.link) && (
-                                    <a href={r.link} target="_blank" rel="noreferrer" title="Buka link" className="p-1 text-indigo-500 hover:bg-indigo-50 rounded">
-                                      <ExternalLink size={14} />
-                                    </a>
-                                  )}
-                                  <button
-                                    onClick={() => setLinkEdit(linkEdit === r.id ? null : r.id)}
-                                    title="Link"
-                                    className={`p-1 rounded hover:bg-slate-100 ${r.link ? "text-indigo-400" : "text-slate-300 opacity-0 group-hover:opacity-100"}`}
-                                  >
-                                    <Link2 size={14} />
-                                  </button>
-                                </div>
-                                {linkEdit === r.id && (
-                                  <Cell
-                                    autoFocus
-                                    value={r.link}
-                                    onChange={(v) => updRow(di, ri, "link", v)}
-                                    onBlur={() => setLinkEdit(null)}
-                                    className="text-xs text-indigo-600 bg-indigo-50 mt-0.5"
-                                    placeholder="Tempel link (Google Maps, website…)"
-                                  />
-                                )}
-                              </td>
-                              <td className="px-1 py-0.5 align-top">
-                                <Cell value={r.activity} onChange={(v) => updRow(di, ri, "activity", v)} className="min-w-40" placeholder="Kegiatan" />
-                              </td>
-                              <td className="px-1 py-0.5 align-top">
-                                <Cell value={r.price} onChange={(v) => updRow(di, ri, "price", v)} className="w-32" placeholder="RM20-40" />
-                              </td>
-                              <td className="px-1 py-0.5 align-top min-w-64">
-                                <div className="flex items-center gap-0.5">
-                                  <Cell value={r.notes} onChange={(v) => updRow(di, ri, "notes", v)} className={isUrl(r.notes) ? "text-indigo-600 truncate" : ""} placeholder="Catatan" />
-                                  {isUrl(r.notes) && (
-                                    <a href={r.notes.trim()} target="_blank" rel="noreferrer" title="Buka link" className="p-1 text-indigo-500 hover:bg-indigo-50 rounded">
-                                      <ExternalLink size={14} />
-                                    </a>
-                                  )}
-                                </div>
-                              </td>
-                              <td className="px-1 align-top pt-1 opacity-0 group-hover:opacity-100 transition">
-                                <Del onClick={() => delRow(di, ri)} title="Hapus baris" />
-                              </td>
-                            </>
-                          ) : (
-                            <td colSpan={6} className="px-2 py-1.5">
-                              <button onClick={() => addRow(di)} className="inline-flex items-center gap-1 text-xs font-medium text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 px-2 py-1 rounded-md">
-                                <Plus size={14} /> Tambah baris
-                              </button>
-                            </td>
-                          )}
-                        </tr>
-                      ))}
-                    </tbody>
-                  ))}
-                </table>
-                {days.length === 0 && <div className="text-center text-sm text-slate-400 py-10">Belum ada hari.</div>}
+            <>
+              <div className="md:hidden">
+                <ItineraryMobile days={days} setDays={setDays} />
               </div>
-              <div className="mt-4">
-                <Btn onClick={addDay} color="bg-indigo-500 hover:bg-indigo-600">
-                  <Plus size={16} /> Tambah hari
-                </Btn>
+              <div className="hidden md:block">
+                <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
+                  <table className="w-full min-w-max border-collapse">
+                    <thead className="bg-slate-800 text-white">
+                      <tr>
+                        <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide w-48">Hari</th>
+                        <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide">Jam</th>
+                        <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide">Tempat</th>
+                        <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide">Kegiatan</th>
+                        <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide">Kira-kira harga</th>
+                        <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide bg-amber-500">Catatan</th>
+                        <th className="w-10" />
+                      </tr>
+                    </thead>
+                    {days.map((day, di) => (
+                      <tbody key={day.id} className={`border-t-2 border-slate-200 ${di % 2 ? "bg-slate-50/70" : "bg-white"}`}>
+                        {[...day.rows, null].map((r, ri) => (
+                          <tr key={r ? r.id : "add"} className={r ? "border-t border-slate-100 group" : ""}>
+                            {ri === 0 && (
+                              <td rowSpan={day.rows.length + 1} className="align-top px-3 py-3 border-r border-slate-200">
+                                <div className="flex items-center justify-between">
+                                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${DAY_TINT[di % DAY_TINT.length]}`}>Hari {di + 1}</span>
+                                  <Del onClick={() => delDay(di)} title="Hapus hari" />
+                                </div>
+                                {day.date && <div className="text-base font-semibold text-slate-800 mt-2 px-2 capitalize">{weekday(day.date)}</div>}
+                                <Cell type="date" value={day.date} onChange={(v) => updDay(di, "date", v)} className="text-slate-500 w-40" />
+                                <Cell value={day.label} onChange={(v) => updDay(di, "label", v)} className="text-xs text-slate-500" placeholder="Judul (opsional)" />
+                                <div className="text-xs text-slate-400 px-2 mt-1">{day.rows.length} tempat</div>
+                              </td>
+                            )}
+                            {r ? (
+                              <>
+                                <td className="px-1 py-0.5 align-top">
+                                  <Cell value={r.time} onChange={(v) => updRow(di, ri, "time", v)} className="w-32 tabular-nums" placeholder="11.00 - 13.30" />
+                                </td>
+                                <td className="px-1 py-0.5 align-top min-w-56">
+                                  <div className="flex items-center gap-0.5">
+                                    <Cell value={r.place} onChange={(v) => updRow(di, ri, "place", v)} className={r.link ? "text-indigo-600 underline underline-offset-2" : ""} placeholder="Tempat" />
+                                    {r.link && isUrl(r.link) && (
+                                      <a href={r.link} target="_blank" rel="noreferrer" title="Buka link" className="p-1 text-indigo-500 hover:bg-indigo-50 rounded">
+                                        <ExternalLink size={14} />
+                                      </a>
+                                    )}
+                                    <button
+                                      onClick={() => setLinkEdit(linkEdit === r.id ? null : r.id)}
+                                      title="Link"
+                                      className={`p-1 rounded hover:bg-slate-100 ${r.link ? "text-indigo-400" : "text-slate-300 opacity-0 group-hover:opacity-100"}`}
+                                    >
+                                      <Link2 size={14} />
+                                    </button>
+                                  </div>
+                                  {linkEdit === r.id && (
+                                    <Cell autoFocus value={r.link} onChange={(v) => updRow(di, ri, "link", v)} onBlur={() => setLinkEdit(null)} className="text-xs text-indigo-600 bg-indigo-50 mt-0.5" placeholder="Tempel link" />
+                                  )}
+                                </td>
+                                <td className="px-1 py-0.5 align-top">
+                                  <Cell value={r.activity} onChange={(v) => updRow(di, ri, "activity", v)} className="min-w-40" placeholder="Kegiatan" />
+                                </td>
+                                <td className="px-1 py-0.5 align-top">
+                                  <Cell value={r.price} onChange={(v) => updRow(di, ri, "price", v)} className="w-32" placeholder="RM20-40" />
+                                </td>
+                                <td className="px-1 py-0.5 align-top min-w-64">
+                                  <div className="flex items-center gap-0.5">
+                                    <Cell value={r.notes} onChange={(v) => updRow(di, ri, "notes", v)} className={isUrl(r.notes) ? "text-indigo-600 truncate" : ""} placeholder="Catatan" />
+                                    {isUrl(r.notes) && (
+                                      <a href={r.notes.trim()} target="_blank" rel="noreferrer" title="Buka link" className="p-1 text-indigo-500 hover:bg-indigo-50 rounded">
+                                        <ExternalLink size={14} />
+                                      </a>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="px-1 align-top pt-1 opacity-0 group-hover:opacity-100 transition">
+                                  <Del onClick={() => delRow(di, ri)} title="Hapus baris" />
+                                </td>
+                              </>
+                            ) : (
+                              <td colSpan={6} className="px-2 py-1.5">
+                                <button onClick={() => addRow(di)} className="inline-flex items-center gap-1 text-xs font-medium text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 px-2 py-1 rounded-md">
+                                  <Plus size={14} /> Tambah baris
+                                </button>
+                              </td>
+                            )}
+                          </tr>
+                        ))}
+                      </tbody>
+                    ))}
+                  </table>
+                  {days.length === 0 && <div className="text-center text-sm text-slate-400 py-10">Belum ada hari.</div>}
+                </div>
+                <div className="mt-4">
+                  <Btn onClick={addDay} color="bg-indigo-500 hover:bg-indigo-600">
+                    <Plus size={16} /> Tambah hari
+                  </Btn>
+                </div>
               </div>
-            </div>
+            </>
           )}
 
           {/* ═════════ PENGELUARAN ═════════ */}
@@ -804,7 +808,12 @@ export default function App() {
                 </div>
                 <Bar pct={packing.length ? (packed / packing.length) * 100 : 0} color="bg-sky-500" />
               </div>
-              <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
+
+              <div className="md:hidden">
+                <PackingMobile packing={packing} setPacking={setPacking} activeNames={activeNames} meName={meName} />
+              </div>
+
+              <div className="hidden md:block bg-white rounded-xl border border-slate-200 overflow-x-auto">
                 <table className="w-full min-w-max">
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
@@ -847,13 +856,28 @@ export default function App() {
                   </tbody>
                 </table>
               </div>
-              <Btn color="bg-sky-500 hover:bg-sky-600" onClick={() => add("packing", { id: uid(), item: "", who: "Everyone", done: false })}>
+              <Btn className="hidden md:inline-flex" color="bg-sky-500 hover:bg-sky-600" onClick={() => add("packing", { id: uid(), item: "", who: "Everyone", done: false })}>
                 <Plus size={16} /> Tambah barang
               </Btn>
             </div>
           )}
         </div>
       </div>
+
+      {/* Navigasi bawah (HP) */}
+      <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur border-t border-slate-200 pb-[env(safe-area-inset-bottom)]">
+        <div className="grid grid-cols-5">
+          {tabs.map(({ id, label, Icon, on }) => {
+            const active = tab === id && !viewingMember;
+            return (
+              <button key={id} onClick={() => goTab(id)} className={`flex flex-col items-center gap-1 pt-2.5 pb-2 text-[11px] font-medium transition ${active ? on.split(" ")[0] : "text-slate-400"}`}>
+                <Icon size={22} strokeWidth={active ? 2.4 : 2} />
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      </nav>
     </div>
   );
 }

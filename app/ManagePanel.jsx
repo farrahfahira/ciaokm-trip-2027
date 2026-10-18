@@ -7,7 +7,7 @@ import { uploadPhoto } from "./ideaUtils";
 
 export default function ManagePanel({ people, onRename, onSetPhoto, onRemove, onRestore, onAdd, onOpenMember, onClose }) {
   const fileRef = useRef(null);
-  const [target, setTarget] = useState(null); // person waiting for a photo
+  const [target, setTarget] = useState(null);
   const [busy, setBusy] = useState(null);
   const [error, setError] = useState("");
   const [newName, setNewName] = useState("");
@@ -28,7 +28,7 @@ export default function ManagePanel({ people, onRename, onSetPhoto, onRemove, on
       const photo = await uploadPhoto(file, 400);
       onSetPhoto(i, photo.url);
     } catch (e) {
-      setError(e.message || "Couldn't upload that photo. Try again.");
+      setError(e.message || "Gagal upload foto.");
     }
     setBusy(null);
     setTarget(null);
@@ -44,17 +44,17 @@ export default function ManagePanel({ people, onRename, onSetPhoto, onRemove, on
     <div className="bg-white rounded-xl border border-slate-200 p-4 mb-5">
       <div className="flex items-center justify-between mb-3">
         <div className="text-sm font-semibold text-slate-700">
-          Travelers <span className="font-normal text-slate-400">· {active.length} on this trip</span>
+          Anggota <span className="font-normal text-slate-400">{active.length} orang</span>
         </div>
-        <button onClick={onClose} title="Close" className="p-1.5 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100">
-          <X size={15} />
+        <button onClick={onClose} aria-label="Tutup" className="p-1.5 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100">
+          <X size={16} />
         </button>
       </div>
 
       <div className="divide-y divide-slate-100">
         {active.map(({ p, i }) => (
           <div key={p.id || i} className="flex items-center gap-3 py-2">
-            <button onClick={() => pickPhoto(i)} title="Change photo" className="relative group shrink-0">
+            <button onClick={() => pickPhoto(i)} title="Ganti foto" className="relative group shrink-0">
               <Avatar name={p.name} i={i} photo={p.photo} size="w-10 h-10 text-sm" />
               <span className={`absolute inset-0 rounded-full bg-black/40 flex items-center justify-center text-white transition ${busy === i ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
                 {busy === i ? <span className="text-[10px]">…</span> : <Camera size={15} />}
@@ -67,14 +67,14 @@ export default function ManagePanel({ people, onRename, onSetPhoto, onRemove, on
             />
             {p.photo && (
               <button onClick={() => onSetPhoto(i, "")} className="hidden sm:inline text-xs text-slate-400 hover:text-slate-600 px-2 py-1 rounded-md hover:bg-slate-100">
-                Remove photo
+                Hapus foto
               </button>
             )}
-            <button onClick={() => onOpenMember(i)} title="Open their page" className="p-1.5 rounded-md text-slate-400 hover:text-indigo-600 hover:bg-indigo-50">
-              <ArrowRight size={15} />
+            <button onClick={() => onOpenMember(i)} title="Buka halaman" className="p-2 rounded-md text-slate-400 hover:text-indigo-600 hover:bg-indigo-50">
+              <ArrowRight size={16} />
             </button>
-            <button onClick={() => onRemove(i)} title="Remove from trip" className="p-1.5 rounded-md text-slate-300 hover:text-rose-500 hover:bg-rose-50">
-              <UserMinus size={15} />
+            <button onClick={() => onRemove(i)} title="Keluarin" className="p-2 rounded-md text-slate-300 hover:text-rose-500 hover:bg-rose-50">
+              <UserMinus size={16} />
             </button>
           </div>
         ))}
@@ -90,28 +90,28 @@ export default function ManagePanel({ people, onRename, onSetPhoto, onRemove, on
         <input
           value={newName}
           onChange={(e) => setNewName(e.target.value)}
-          placeholder="New traveler's name"
+          placeholder="Nama anggota baru"
           className="flex-1 min-w-0 text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-300 placeholder:text-slate-400"
         />
         <button type="submit" className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-medium text-white bg-indigo-500 hover:bg-indigo-600">
-          <Plus size={16} /> Add
+          <Plus size={16} /> Tambah
         </button>
       </form>
-      <p className="text-xs text-slate-400 mt-2">Tap a face to change the photo. New travelers aren't added to existing expenses. Add them to any splits they should share.</p>
+      <p className="text-xs text-slate-400 mt-2">Tap foto buat ganti. Anggota baru nggak otomatis ikut pengeluaran yang udah ada.</p>
       {error && <p className="text-xs text-rose-500 mt-2">{error}</p>}
 
       {removed.length > 0 && (
         <div className="mt-4 pt-3 border-t border-slate-100">
-          <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Removed</div>
+          <div className="text-xs font-semibold text-slate-500 mb-1">Udah keluar</div>
           {removed.map(({ p, i }) => (
             <div key={p.id || i} className="flex items-center gap-3 py-1.5 text-sm text-slate-500">
               <Avatar name={p.name} i={i} photo={p.photo} size="w-7 h-7 text-xs" className="grayscale opacity-60" />
               <span className="flex-1 truncate">{p.name}</span>
               <button onClick={() => onOpenMember(i)} className="text-xs text-slate-400 hover:text-indigo-600 px-2 py-1 rounded-md hover:bg-indigo-50">
-                View page
+                Lihat
               </button>
               <button onClick={() => onRestore(i)} className="inline-flex items-center gap-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50 px-2 py-1 rounded-md">
-                <RotateCcw size={12} /> Restore
+                <RotateCcw size={12} /> Balikin
               </button>
             </div>
           ))}

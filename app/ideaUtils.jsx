@@ -1,8 +1,9 @@
-// Shared helpers for the Ideas board and idea pages
+// Helper buat tab Ide dan halaman ide
 
 export { AVATAR, Avatar } from "./shared";
 
 export const IDEA_CATS = ["Food", "Sights", "Shopping", "Stay", "Activity", "Info"];
+export const IDEA_LABEL = { Food: "Makan", Sights: "Wisata", Shopping: "Belanja", Stay: "Penginapan", Activity: "Aktivitas", Info: "Info" };
 export const IDEA_TINT = {
   Food: "bg-amber-50 text-amber-700",
   Sights: "bg-indigo-50 text-indigo-700",
@@ -22,15 +23,15 @@ export const domainOf = (link) => {
   }
 };
 const weekday = (date) => (date ? new Date(date + "T00:00:00").toLocaleDateString("id-ID", { weekday: "long" }) : "");
-export const dayLabel = (d, i) => `Day ${i + 1}${d.date ? ` · ${weekday(d.date)}` : ""}${d.label ? ` · ${d.label}` : ""}`;
+export const dayLabel = (d, i) => `Hari ${i + 1}${d.date ? `, ${weekday(d.date)}` : ""}${d.label ? `, ${d.label}` : ""}`;
 
-// The starred photo, or the first photo if nobody picked one
+// Foto yang dijadiin sampul, atau foto pertama kalau belum ada
 export const coverOf = (x) => {
   const photos = x.photos || [];
   return photos.find((p) => p.id === x.cover) || photos[0] || null;
 };
 export const firstLinkOf = (x) => (x.links || [])[0]?.url || "";
-export const titleOf = (x) => x.text || domainOf(firstLinkOf(x)) || "Untitled idea";
+export const titleOf = (x) => x.text || domainOf(firstLinkOf(x)) || "Ide tanpa nama";
 
 const loadImage = (file) =>
   new Promise((resolve, reject) => {
@@ -42,12 +43,12 @@ const loadImage = (file) =>
     };
     img.onerror = () => {
       URL.revokeObjectURL(url);
-      reject(new Error(`Couldn't read ${file.name}. Try a JPG or PNG.`));
+      reject(new Error(`${file.name} nggak kebaca. Coba pakai JPG atau PNG.`));
     };
     img.src = url;
   });
 
-// Shrink a photo on the device before uploading (JPEG, longest side = max)
+// Kecilin foto di HP dulu sebelum diupload (JPEG, sisi terpanjang = max)
 export async function shrinkImage(file, max = 1600, quality = 0.82) {
   const img = await loadImage(file);
   const scale = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
@@ -57,10 +58,10 @@ export async function shrinkImage(file, max = 1600, quality = 0.82) {
   canvas.width = w;
   canvas.height = h;
   const ctx = canvas.getContext("2d");
-  ctx.fillStyle = "#fff"; // transparent PNGs get a white background instead of black
+  ctx.fillStyle = "#fff";
   ctx.fillRect(0, 0, w, h);
   ctx.drawImage(img, 0, 0, w, h);
-  const blob = await new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Couldn't compress the photo."))), "image/jpeg", quality));
+  const blob = await new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Gagal ngecilin foto."))), "image/jpeg", quality));
   return { blob, w, h };
 }
 
@@ -68,6 +69,6 @@ export async function uploadPhoto(file, max = 1600) {
   const { blob, w, h } = await shrinkImage(file, max);
   const res = await fetch("/api/photos", { method: "POST", headers: { "Content-Type": "image/jpeg" }, body: blob });
   const body = await res.json().catch(() => ({}));
-  if (!res.ok || !body.url) throw new Error(body.error || `Couldn't upload ${file.name}.`);
+  if (!res.ok || !body.url) throw new Error(`Gagal upload ${file.name}.`);
   return { id: uid(), url: body.url, w, h };
 }
