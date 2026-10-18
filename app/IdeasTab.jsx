@@ -1,36 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Plus, Trash2, ExternalLink, Heart, Link2, CalendarPlus, Check, MapPin } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Plus, Trash2, Heart, CalendarPlus, Check, Image as ImageIcon } from "lucide-react";
+import IdeaPage from "./IdeaPage";
+import { IDEA_CATS, IDEA_TINT, uid, URL_RE, dayLabel, coverOf, firstLinkOf, titleOf, domainOf } from "./ideaUtils";
 
-const AVATAR = ["bg-rose-400", "bg-orange-400", "bg-amber-400", "bg-emerald-500", "bg-teal-500", "bg-sky-500", "bg-indigo-500", "bg-violet-500"];
-const IDEA_CATS = ["Food", "Sights", "Shopping", "Stay", "Activity", "Info"];
-const IDEA_TINT = {
-  Food: "bg-amber-50 text-amber-700",
-  Sights: "bg-indigo-50 text-indigo-700",
-  Shopping: "bg-rose-50 text-rose-700",
-  Stay: "bg-sky-50 text-sky-700",
-  Activity: "bg-emerald-50 text-emerald-700",
-  Info: "bg-slate-100 text-slate-600",
-};
 const ME_KEY = "trip-planner-me";
-
-const uid = () => Math.random().toString(36).slice(2, 9);
-const URL_RE = /https?:\/\/\S+/i;
-const domainOf = (link) => {
-  try {
-    return new URL(link).hostname.replace(/^www\./, "");
-  } catch {
-    return "";
-  }
-};
-const weekday = (date) => (date ? new Date(date + "T00:00:00").toLocaleDateString("id-ID", { weekday: "long" }) : "");
-const dayLabel = (d, i) => `Day ${i + 1}${d.date ? ` · ${weekday(d.date)}` : ""}${d.label ? ` · ${d.label}` : ""}`;
 const isEmptyRow = (r) => !r.time && !r.place && !r.link && !r.activity && !r.price && !r.notes;
-
-const Avatar = ({ name, i, size = "w-6 h-6 text-xs" }) => (
-  <span className={`inline-flex ${size} shrink-0 rounded-full ${AVATAR[i % 8]} text-white font-semibold items-center justify-center`}>{(name || "?").trim().charAt(0).toUpperCase() || "?"}</span>
-);
 
 const Chip = ({ active, onClick, children }) => (
   <button
@@ -40,8 +16,6 @@ const Chip = ({ active, onClick, children }) => (
     {children}
   </button>
 );
-
-const inputBase = "bg-transparent rounded-md hover:bg-slate-100/70 focus:bg-white focus:outline-none focus:ring-2 focus:ring-violet-300 placeholder:text-slate-300";
 
 export default function IdeasTab({ data, setData }) {
   const { people, days } = data;
@@ -55,7 +29,10 @@ export default function IdeasTab({ data, setData }) {
   const [me, setMeState] = useState(null);
   const [needMe, setNeedMe] = useState(false);
   const [newCity, setNewCity] = useState(null); // null = closed
-  const [linkEdit, setLinkEdit] = useState(null);
+  const [openId, setOpenId] = useState(null);
+  const openedHere = useRef(false);
+  const boardScroll = useRef(0);
+  const topRef = useRef(null);
 
   // "I'm…" is remembered per device, not shared
   useEffect(() => {
@@ -69,18 +46,46 @@ export default function IdeasTab({ data, setData }) {
     else localStorage.setItem(ME_KEY, String(v));
   };
 
-  // If a friend deleted the city you're filtering by, fall back to All
+  // Each idea page has its own link: #idea-<id>. The back button closes it.
+  useEffect(() => {
+    const read = () => {
+      const h = window.location.hash;
+      setOpenId(h.startsWith("#idea-") ? h.slice(6) : null);
+    };
+    read();
+    window.addEventListener("hashchange", read);
+    return () => window.removeEventListener("hashchange", read);
+  }, []);
+  const openIdea = (id) => {
+    boardScroll.current = window.scrollY;
+    openedHere.current = true;
+    window.location.hash = `idea-${id}`;
+  };
+  const closeIdea = () => {
+    if (openedHere.current) {
+      openedHere.current = false;
+      window.history.back();
+    } else {
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+      setOpenId(null);
+    }
+  };
+  useEffect(() => {
+    if (openId) topRef.current?.scrollIntoView({ block: "start" });
+    else if (boardScroll.current) {
+      const y = boardScroll.current;
+      requestAnimationFrame(() => window.scrollTo(0, y));
+    }
+  }, [openId]);
 
+  // If a friend deleted the city you're filtering by, fall back to All
   const activeCity = cityFilter === "all" || cityFilter === "" || cities.some((c) => c.id === cityFilter) ? cityFilter : "all";
   const selectedCity = cities.find((c) => c.id === activeCity);
   const cityOf = (x) => (cities.some((c) => c.id === x.city) ? x.city : "");
 
   // ── updaters (by id, so friends' edits never hit the wrong card) ──
   const setIdeas = (fn) => setData((d) => ({ ...d, ideas: fn(d.ideas || []) }));
-  const updIdea = (id, f, v) => setIdeas((xs) => xs.map((x) => (x.id === id ? { ...x, [f]: v } : x)));
-  const delIdea = (id) => {
-    if (confirm("Delete this idea?")) setIdeas((xs) => xs.filter((x) => x.id !== id));
-  };
+  const setIdeaById = (id) => (fn) => setIdeas((xs) => xs.map((x) => (x.id === id ? fn(x) : x)));
 
   const addIdea = () => {
     const raw = draft.trim();
@@ -92,7 +97,9 @@ export default function IdeasTab({ data, setData }) {
       {
         id: uid(),
         text,
-        link,
+        links: link ? [{ id: uid(), url: link }] : [],
+        photos: [],
+        cover: "",
         note: "",
         city: activeCity === "all" ? "" : activeCity,
         cat: catFilter === "all" ? "" : catFilter,
@@ -145,7 +152,8 @@ export default function IdeasTab({ data, setData }) {
 
   // Copy an idea into an itinerary day (fills the day's empty last row if there is one)
   const moveToDay = (idea, dayId) => {
-    const row = { id: uid(), time: "", place: idea.text || domainOf(idea.link) || "Idea", link: idea.link || "", activity: idea.cat || "", price: "", notes: idea.note || "" };
+    const link = firstLinkOf(idea);
+    const row = { id: uid(), time: "", place: idea.text || domainOf(link) || "Idea", link, activity: idea.cat || "", price: "", notes: idea.note || "" };
     setData((d) => ({
       ...d,
       days: d.days.map((x) => {
@@ -170,6 +178,43 @@ export default function IdeasTab({ data, setData }) {
     .filter((x) => catFilter === "all" || (x.cat || "") === catFilter)
     .sort((a, b) => Number(!!a.planned) - Number(!!b.planned) || (sort === "interest" ? likesOf(b).length - likesOf(a).length : 0) || (b.created || 0) - (a.created || 0));
 
+  // ── idea page ──
+  if (openId) {
+    const idea = ideas.find((x) => x.id === openId);
+    return (
+      <div ref={topRef} className="scroll-mt-4">
+        {idea ? (
+          <IdeaPage
+            idea={idea}
+            people={people}
+            cities={cities}
+            days={days}
+            me={me}
+            needMe={needMe}
+            setMe={setMe}
+            setIdea={setIdeaById(idea.id)}
+            onToggleLike={() => toggleLike(idea)}
+            onMoveToDay={(dayId) => moveToDay(idea, dayId)}
+            onDelete={() => {
+              if (!confirm("Delete this idea and its photos?")) return;
+              setIdeas((xs) => xs.filter((x) => x.id !== idea.id));
+              closeIdea();
+            }}
+            onBack={closeIdea}
+          />
+        ) : (
+          <div className="bg-white rounded-xl border border-slate-200 p-10 text-center space-y-3">
+            <p className="text-sm text-slate-500">This idea doesn't exist anymore. Someone may have deleted it.</p>
+            <button onClick={closeIdea} className="text-sm font-medium text-violet-600 hover:bg-violet-50 px-3 py-1.5 rounded-lg">
+              Back to ideas
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── board ──
   return (
     <div className="space-y-4">
       {/* Quick add + who am I */}
@@ -296,108 +341,59 @@ export default function IdeasTab({ data, setData }) {
           {ideas.length === 0 ? "Toss in your first idea above: a cafe, a link, anything." : "No ideas match these filters."}
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 items-start">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 items-start">
           {visible.map((x) => {
             const likes = likesOf(x);
             const mine = me !== null && likes.includes(me);
-            const dom = domainOf(x.link);
+            const cover = coverOf(x);
+            const nPhotos = (x.photos || []).length;
+            const cityName = cities.find((c) => c.id === cityOf(x))?.name;
+            const meta = [x.cat, cityName].filter(Boolean).join(" · ");
+            const firstLine = (x.note || "").split("\n").find((l) => l.trim()) || "";
             const plannedIdx = x.planned ? days.findIndex((d) => d.id === x.plannedDay) : -1;
             return (
-              <div key={x.id} className={`bg-white rounded-xl border border-slate-200 p-3 space-y-2 transition ${x.planned ? "opacity-60" : ""}`}>
-                <div className="flex items-center gap-1.5">
-                  <select
-                    value={x.cat || ""}
-                    onChange={(e) => updIdea(x.id, "cat", e.target.value)}
-                    className={`text-xs font-medium rounded-md px-1.5 py-1 cursor-pointer focus:outline-none focus:ring-2 focus:ring-violet-300 ${x.cat ? IDEA_TINT[x.cat] : "bg-slate-50 text-slate-400"}`}
-                  >
-                    <option value="">Category</option>
-                    {IDEA_CATS.map((c) => (
-                      <option key={c}>{c}</option>
-                    ))}
-                  </select>
-                  <select
-                    value={cityOf(x)}
-                    onChange={(e) => updIdea(x.id, "city", e.target.value)}
-                    className="text-xs rounded-md px-1.5 py-1 bg-slate-50 text-slate-500 cursor-pointer focus:outline-none focus:ring-2 focus:ring-violet-300 max-w-32"
-                  >
-                    <option value="">Unsorted</option>
-                    {cities.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name || "Unnamed"}
-                      </option>
-                    ))}
-                  </select>
-                  <button onClick={() => delIdea(x.id)} title="Delete idea" className="ml-auto p-1 rounded-md text-slate-300 hover:text-rose-500 hover:bg-rose-50 transition">
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-
-                <input
-                  value={x.text}
-                  onChange={(e) => updIdea(x.id, "text", e.target.value)}
-                  placeholder={dom ? `Name this ${dom} link` : "Name this idea"}
-                  className={`w-full text-sm font-semibold text-slate-800 px-1.5 py-1 placeholder:font-normal ${inputBase}`}
-                />
-
-                {linkEdit === x.id ? (
-                  <input
-                    autoFocus
-                    value={x.link || ""}
-                    onChange={(e) => updIdea(x.id, "link", e.target.value.trim())}
-                    onBlur={() => setLinkEdit(null)}
-                    placeholder="Paste a link (Google Maps, Instagram, TikTok…)"
-                    className="w-full text-xs text-indigo-600 bg-indigo-50 px-1.5 py-1 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-300"
-                  />
-                ) : (
-                  <div className="flex items-center gap-2 px-1.5 text-xs">
-                    {dom && (
-                      <a href={x.link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-indigo-600 hover:underline truncate">
-                        <ExternalLink size={12} /> {dom}
-                      </a>
-                    )}
-                    <button onClick={() => setLinkEdit(x.id)} className="inline-flex items-center gap-1 text-slate-400 hover:text-slate-600 shrink-0">
-                      <Link2 size={12} /> {x.link ? "Edit link" : "Add link"}
-                    </button>
+              <div
+                key={x.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => openIdea(x.id)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && e.target === e.currentTarget) openIdea(x.id);
+                }}
+                className={`bg-white rounded-xl border border-slate-200 overflow-hidden cursor-pointer hover:border-violet-300 hover:shadow-sm transition focus:outline-none focus:ring-2 focus:ring-violet-300 ${x.planned ? "opacity-60" : ""}`}
+              >
+                {cover && (
+                  <div className="relative aspect-[4/3] bg-slate-100">
+                    <img src={cover.url} alt="" loading="lazy" className="w-full h-full object-cover" />
+                    <span className="absolute bottom-1.5 right-1.5 inline-flex items-center gap-1 text-[11px] bg-white/90 text-slate-600 px-1.5 py-0.5 rounded">
+                      <ImageIcon size={11} /> {nPhotos}
+                    </span>
                   </div>
                 )}
-
-                <textarea
-                  value={x.note || ""}
-                  onChange={(e) => updIdea(x.id, "note", e.target.value)}
-                  rows={2}
-                  placeholder="Notes: opening hours, price, who recommended it…"
-                  className={`w-full text-xs text-slate-600 px-1.5 py-1 resize-none ${inputBase}`}
-                />
-
-                <div className="flex items-center gap-2 pt-2 border-t border-slate-100">
-                  <button
-                    onClick={() => toggleLike(x)}
-                    title={mine ? "Not interested anymore" : "I'm interested"}
-                    className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md transition ${mine ? "bg-rose-50 text-rose-600" : "text-slate-400 hover:text-rose-500 hover:bg-rose-50"}`}
-                  >
-                    <Heart size={14} fill={mine ? "currentColor" : "none"} /> {likes.length || ""}
-                  </button>
-                  <div className="flex -space-x-1">
-                    {likes.map((p) => (
-                      <span key={p} title={people[p].name} className="ring-2 ring-white rounded-full">
-                        <Avatar name={people[p].name} i={p} size="w-5 h-5 text-[10px]" />
-                      </span>
-                    ))}
-                  </div>
-                  <div className="ml-auto">
+                <div className="p-3">
+                  <div className="text-sm font-semibold text-slate-800 truncate">{titleOf(x)}</div>
+                  {meta && <div className="text-xs text-slate-500 mt-0.5 truncate">{meta}</div>}
+                  {!cover && firstLine && <div className="text-xs text-slate-400 mt-2 line-clamp-2">{firstLine}</div>}
+                  <div className="flex items-center justify-between mt-3 -mb-1">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleLike(x);
+                      }}
+                      title={mine ? "Not interested anymore" : "I'm interested"}
+                      className={`inline-flex items-center gap-1 text-xs px-1.5 py-1 -ml-1.5 rounded-md transition ${mine ? "text-rose-600" : "text-slate-400 hover:text-rose-500 hover:bg-rose-50"}`}
+                    >
+                      <Heart size={14} fill={mine ? "currentColor" : "none"} /> {likes.length}
+                    </button>
                     {x.planned ? (
-                      <button
-                        onClick={() => updIdea(x.id, "planned", false)}
-                        title="Mark as not planned (the itinerary row stays)"
-                        className="inline-flex items-center gap-1 text-xs text-emerald-600 px-2 py-1 rounded-md hover:bg-emerald-50"
-                      >
+                      <span className="inline-flex items-center gap-1 text-xs text-emerald-600">
                         <Check size={13} /> {plannedIdx >= 0 ? `Day ${plannedIdx + 1}` : "Planned"}
-                      </button>
+                      </span>
                     ) : (
                       days.length > 0 && (
-                        <label className="relative inline-flex items-center gap-1 text-xs text-violet-600 px-2 py-1 rounded-md hover:bg-violet-50 cursor-pointer">
-                          <CalendarPlus size={13} /> Move to day
-                          <select value="" onChange={(e) => e.target.value && moveToDay(x, e.target.value)} className="absolute inset-0 opacity-0 cursor-pointer">
+                        <label onClick={(e) => e.stopPropagation()} title="Move to day" className="relative p-1.5 -mr-1.5 rounded-md text-slate-400 hover:text-violet-600 hover:bg-violet-50 cursor-pointer">
+                          <CalendarPlus size={15} />
+                          <select value="" onChange={(e) => e.target.value && moveToDay(x, e.target.value)} className="absolute inset-0 w-full opacity-0 cursor-pointer">
                             <option value="">Choose a day</option>
                             {days.map((d, i) => (
                               <option key={d.id} value={d.id}>
@@ -410,7 +406,6 @@ export default function IdeasTab({ data, setData }) {
                     )}
                   </div>
                 </div>
-                {x.by != null && people[x.by] && <div className="text-[11px] text-slate-400 px-1.5">Added by {people[x.by].name}</div>}
               </div>
             );
           })}

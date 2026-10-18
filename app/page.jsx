@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Plus, Trash2, RotateCcw, MapPin, Calendar, PiggyBank, CalendarDays, Wallet, Luggage, Check, ExternalLink, Link2, ArrowRight, CheckCheck, Lightbulb, History as HistoryIcon } from "lucide-react";
 import { useSharedTrip } from "./useSharedTrip";
 import IdeasTab from "./IdeasTab";
@@ -120,6 +120,11 @@ const migrate = (s) => {
     settled: !!e.settled,
   }));
   out.packing = (s.packing || d.packing).map((p, i) => ({ ...p, id: p.id || `pk-${i}` }));
+  out.ideas = (Array.isArray(s.ideas) ? s.ideas : []).map((x) => {
+    const { link, ...rest } = x;
+    const links = Array.isArray(x.links) ? x.links : link ? [{ id: `${x.id}-l0`, url: link }] : [];
+    return { ...rest, links, photos: Array.isArray(x.photos) ? x.photos : [], cover: x.cover || "" };
+  });
   return out;
 };
 
@@ -214,6 +219,16 @@ export default function App() {
   const [linkEdit, setLinkEdit] = useState(null);
   const [settleMode, setSettleMode] = useState("separate");
   const [showHistory, setShowHistory] = useState(false);
+
+  // Shared links to an idea (#idea-…) open the Ideas tab
+  useEffect(() => {
+    const check = () => {
+      if (window.location.hash.startsWith("#idea-")) setTab("ideas");
+    };
+    check();
+    window.addEventListener("hashchange", check);
+    return () => window.removeEventListener("hashchange", check);
+  }, []);
 
   const { trip, currencies, people, days, expenses, packing } = data;
   const home = currencies[0];
