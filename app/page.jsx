@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Trash2, RotateCcw, MapPin, Calendar, PiggyBank, CalendarDays, Wallet, Luggage, Check, ExternalLink, Link2, ArrowRight, CheckCheck } from "lucide-react";
+import { Plus, Trash2, RotateCcw, MapPin, Calendar, PiggyBank, CalendarDays, Wallet, Luggage, Check, ExternalLink, Link2, ArrowRight, CheckCheck, Lightbulb } from "lucide-react";
 import { useSharedTrip } from "./useSharedTrip";
 
 const AVATAR = ["bg-rose-400", "bg-orange-400", "bg-amber-400", "bg-emerald-500", "bg-teal-500", "bg-sky-500", "bg-indigo-500", "bg-violet-500"];
@@ -71,6 +71,8 @@ const defaults = () => {
       { id: "pk-1", item: "Phone charger", who: "Everyone", done: false },
       { id: "pk-2", item: "Power bank", who: "Person 1", done: false },
     ],
+    ideas: [],
+    ideaCities: [],
   };
 };
 
@@ -344,6 +346,7 @@ export default function App() {
 
   const tabs = [
     { id: "save", label: "Save", Icon: PiggyBank, on: "text-emerald-600 border-emerald-500" },
+    { id: "ideas", label: "Ideas", Icon: Lightbulb, on: "text-violet-600 border-violet-500" },
     { id: "itinerary", label: "Itinerary", Icon: CalendarDays, on: "text-indigo-600 border-indigo-500" },
     { id: "budget", label: "Budget & Split", Icon: Wallet, on: "text-amber-600 border-amber-500" },
     { id: "packing", label: "Packing", Icon: Luggage, on: "text-sky-600 border-sky-500" },
@@ -538,6 +541,7 @@ export default function App() {
             </div>
           )}
 
+          {tab === "ideas" && <IdeasTab data={data} setData={setData} />}
           {/* ═════════ ITINERARY ═════════ */}
           {tab === "itinerary" && (
             <div>
