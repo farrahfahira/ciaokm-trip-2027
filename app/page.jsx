@@ -1,27 +1,9 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import { Plus, Trash2, RotateCcw, MapPin, Calendar, PiggyBank, CalendarDays, Wallet, Luggage, Check, ExternalLink, Link2, ArrowRight, CheckCheck, X, Camera, UserPlus, Users } from "lucide-react";
+import { useState } from "react";
+import { Plus, Trash2, RotateCcw, MapPin, Calendar, PiggyBank, CalendarDays, Wallet, Luggage, Check, ExternalLink, Link2, ArrowRight, CheckCheck } from "lucide-react";
+import { useSharedTrip } from "./useSharedTrip";
 
-// ── Storage bridge: same API the planner used in Claude, backed by /api/trip ──
-if (typeof window !== "undefined" && !window.storage) {
-  const url = (k) => `/api/trip?key=${encodeURIComponent(k)}`;
-  window.storage = {
-    async get(key) {
-      const r = await fetch(url(key), { cache: "no-store" });
-      const { value } = await r.json();
-      if (!r.ok || value == null) throw new Error("not found");
-      return { key, value };
-    },
-    async set(key, value) {
-      const r = await fetch(url(key), { method: "PUT", body: value });
-      if (!r.ok) throw new Error("save failed");
-      return { key, value };
-    },
-  };
-}
-
-const KEY = "cute-trip-planner-v1";
 const AVATAR = ["bg-rose-400", "bg-orange-400", "bg-amber-400", "bg-emerald-500", "bg-teal-500", "bg-sky-500", "bg-indigo-500", "bg-violet-500"];
 const DAY_TINT = ["bg-indigo-100 text-indigo-700", "bg-emerald-100 text-emerald-700", "bg-amber-100 text-amber-700", "bg-rose-100 text-rose-700", "bg-sky-100 text-sky-700", "bg-violet-100 text-violet-700"];
 const CATS = ["Stay", "Transport", "Food", "Activities", "Shopping", "Other"];
@@ -34,16 +16,28 @@ const CAT_TINT = {
   Other: "bg-slate-100 text-slate-600",
 };
 const NO_DECIMALS = ["IDR", "JPY", "KRW", "VND"];
-const MONTHS = 12;
+const DEFAULT_MONTHS = 12;
+const MAX_MONTHS = 60;
 
 const uid = () => Math.random().toString(36).slice(2, 9);
 const num = (v) => Number(v) || 0;
-const blankMonths = () => Array(MONTHS).fill("");
-const newPerson = (name) => ({ id: uid(), name, photo: "", months: blankMonths() });
+const blankMonths = () => Array(DEFAULT_MONTHS).fill("");
 const isUrl = (s) => /^https?:\/\//i.test(String(s || "").trim());
 const thisMonth = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+};
+const addMonths = (ym, k) => {
+  const [y, m] = String(ym || thisMonth())
+    .split("-")
+    .map(Number);
+  const d = new Date(y, m - 1 + k, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+};
+const monthDiff = (a, b) => {
+  const [ay, am] = a.split("-").map(Number);
+  const [by, bm] = b.split("-").map(Number);
+  return (by - ay) * 12 + (bm - am);
 };
 const weekday = (date) => (date ? new Date(date + "T00:00:00").toLocaleDateString("id-ID", { weekday: "long" }) : "");
 const nextDate = (date) => {
@@ -54,33 +48,13 @@ const nextDate = (date) => {
 };
 const blankRow = () => ({ id: uid(), time: "", place: "", link: "", activity: "", price: "", notes: "" });
 
-// Shrinks an uploaded photo to a small square JPEG so it's light to store & sync
-const resizeImage = (file, size = 128) =>
-  new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = reject;
-    reader.onload = () => {
-      const img = new Image();
-      img.onerror = reject;
-      img.onload = () => {
-        const s = Math.min(img.width, img.height);
-        const c = document.createElement("canvas");
-        c.width = c.height = size;
-        c.getContext("2d").drawImage(img, (img.width - s) / 2, (img.height - s) / 2, s, s, 0, 0, size, size);
-        resolve(c.toDataURL("image/jpeg", 0.8));
-      };
-      img.src = reader.result;
-    };
-    reader.readAsDataURL(file);
-  });
-
 const defaults = () => {
-  const people = Array.from({ length: 8 }, (_, i) => newPerson(`Person ${i + 1}`));
+  const people = Array.from({ length: 8 }, (_, i) => ({ name: `Person ${i + 1}`, months: blankMonths() }));
   return {
-    trip: { name: "Group Trip", dest: "", start: "", end: "", saveStart: thisMonth(), monthly: "" },
+    trip: { name: "Group Trip", dest: "", start: "", end: "", saveStart: thisMonth(), saveEnd: addMonths(thisMonth(), DEFAULT_MONTHS - 1), monthly: "" },
     currencies: [
-      { code: "IDR", symbol: "Rp", rate: 1 },
-      { code: "MYR", symbol: "RM", rate: 3800 },
+      { id: "cur-0", code: "IDR", symbol: "Rp", rate: 1 },
+      { id: "cur-1", code: "MYR", symbol: "RM", rate: 3800 },
     ],
     people,
     days: [
@@ -93,9 +67,9 @@ const defaults = () => {
       { id: uid(), cat: "Transport", item: "Grab to hotel (car 2)", amount: "", cur: "MYR", paidBy: 4, split: [4, 5, 6, 7], settled: false },
     ],
     packing: [
-      { item: "Passport", who: "Everyone", done: false },
-      { item: "Phone charger", who: "Everyone", done: false },
-      { item: "Power bank", who: "Person 1", done: false },
+      { id: "pk-0", item: "Passport", who: "Everyone", done: false },
+      { id: "pk-1", item: "Phone charger", who: "Everyone", done: false },
+      { id: "pk-2", item: "Power bank", who: "Person 1", done: false },
     ],
   };
 };
@@ -105,16 +79,17 @@ const normCat = (c) => {
   return CATS.find((x) => s.includes(x.toLowerCase().slice(0, 4))) || (s.includes("fun") ? "Activities" : "Other");
 };
 
-// Upgrade older saved data to the current format
+// Upgrade older saved data to the current format.
+// Missing ids get predictable values so every friend's browser upgrades the same way.
 const migrate = (s) => {
   const d = defaults();
-  const out = { ...d, ...s, trip: { ...d.trip, ...(s.trip || {}) } };
-  out.currencies = Array.isArray(s.currencies) && s.currencies.length ? s.currencies : d.currencies;
-  out.people = (Array.isArray(s.people) && s.people.length ? s.people : d.people).map((p) => ({
-    id: p.id || uid(),
-    name: p.name ?? "",
-    photo: p.photo || "",
-    months: Array.isArray(p.months) ? [...p.months, ...blankMonths()].slice(0, MONTHS) : [num(p.saved) || "", ...Array(MONTHS - 1).fill("")],
+  const t = s.trip || {};
+  const out = { ...d, ...s };
+  out.trip = { ...d.trip, ...t, saveEnd: t.saveEnd || addMonths(t.saveStart || d.trip.saveStart, DEFAULT_MONTHS - 1) };
+  out.currencies = (Array.isArray(s.currencies) && s.currencies.length ? s.currencies : d.currencies).map((c, i) => ({ ...c, id: c.id || `cur-${i}` }));
+  out.people = (s.people || d.people).map((p) => ({
+    name: p.name,
+    months: Array.isArray(p.months) ? p.months : [num(p.saved) || ""],
   }));
   if (!Array.isArray(s.days)) {
     if (Array.isArray(s.itinerary) && s.itinerary.length) {
@@ -127,18 +102,18 @@ const migrate = (s) => {
     } else out.days = d.days;
   }
   delete out.itinerary;
-  const n = out.people.length;
   const all = out.people.map((_, i) => i);
-  out.expenses = (s.expenses || d.expenses).map((e) => ({
-    id: e.id || uid(),
+  out.expenses = (s.expenses || d.expenses).map((e, i) => ({
+    id: e.id || `ex-${i}`,
     cat: normCat(e.cat),
     item: e.item || "",
     amount: e.amount ?? e.cost ?? "",
     cur: e.cur || out.currencies[0].code,
-    paidBy: Math.min(num(e.paidBy), n - 1),
-    split: (Array.isArray(e.split) ? e.split : all).filter((i) => i < n),
+    paidBy: num(e.paidBy),
+    split: Array.isArray(e.split) ? e.split : all,
     settled: !!e.settled,
   }));
+  out.packing = (s.packing || d.packing).map((p, i) => ({ ...p, id: p.id || `pk-${i}` }));
   return out;
 };
 
@@ -194,12 +169,9 @@ const Stat = ({ label, value, accent, sub }) => (
   </div>
 );
 
-const Avatar = ({ person, i, size = "w-7 h-7 text-xs", className = "" }) =>
-  person?.photo ? (
-    <img src={person.photo} alt={person.name || "Traveler"} className={`${size} shrink-0 rounded-full object-cover bg-slate-100 ${className}`} />
-  ) : (
-    <span className={`inline-flex ${size} shrink-0 rounded-full ${AVATAR[i % 8]} text-white font-semibold items-center justify-center ${className}`}>{(person?.name || "?").trim().charAt(0).toUpperCase() || "?"}</span>
-  );
+const Avatar = ({ name, i, size = "w-7 h-7 text-xs", className = "" }) => (
+  <span className={`inline-flex ${size} shrink-0 rounded-full ${AVATAR[i % 8]} text-white font-semibold items-center justify-center ${className}`}>{(name || "?").trim().charAt(0).toUpperCase() || "?"}</span>
+);
 
 const TH = ({ children, className = "" }) => <th className={`px-3 py-2.5 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide ${className}`}>{children}</th>;
 
@@ -221,83 +193,20 @@ const Select = ({ value, onChange, children, className = "" }) => (
   </select>
 );
 
+const STATUS_TEXT = {
+  loading: "",
+  saving: "Saving…",
+  saved: "Saved · shared with everyone",
+  updated: "Updated with friends' changes ✓",
+  error: "Couldn't save · retrying…",
+};
+
 export default function App() {
-  const [data, setData] = useState(defaults());
+  // ── Shared storage: everyone with the link sees & edits the same data ──
+  const { trip: data, update: setData, status, ready } = useSharedTrip(defaults, migrate);
   const [tab, setTab] = useState("itinerary");
-  const [loaded, setLoaded] = useState(false);
-  const [status, setStatus] = useState("");
   const [linkEdit, setLinkEdit] = useState(null);
   const [settleMode, setSettleMode] = useState("separate");
-  const [showPeople, setShowPeople] = useState(false);
-
-  // ── Shared storage: everyone with the link sees & edits the same data ──
-  const SHARED_KEY = "group-trip-shared-v1";
-  const lastSynced = useRef("");
-  const lastEdit = useRef(0);
-  const fromRemote = useRef(false);
-
-  useEffect(() => {
-    (async () => {
-      let raw = null;
-      try {
-        const r = await window.storage.get(SHARED_KEY, true);
-        if (r && r.value) raw = r.value;
-      } catch (e) {}
-      if (!raw) {
-        try {
-          const r = await window.storage.get(KEY, false);
-          if (r && r.value) raw = r.value;
-        } catch (e) {}
-      }
-      if (raw) {
-        try {
-          setData(migrate(JSON.parse(raw)));
-        } catch (e) {}
-      }
-      setLoaded(true);
-    })();
-  }, []);
-
-  // Save changes to shared storage
-  useEffect(() => {
-    if (!loaded) return;
-    if (fromRemote.current) {
-      fromRemote.current = false;
-      return;
-    }
-    lastEdit.current = Date.now();
-    setStatus("Saving…");
-    const t = setTimeout(async () => {
-      const s = JSON.stringify(data);
-      try {
-        await window.storage.set(SHARED_KEY, s, true);
-        lastSynced.current = s;
-        setStatus("Saved · shared with everyone");
-      } catch (e) {
-        setStatus("Couldn't save");
-      }
-    }, 700);
-    return () => clearTimeout(t);
-  }, [data, loaded]);
-
-  // Pull friends' changes every few seconds (pauses while you're typing)
-  useEffect(() => {
-    if (!loaded) return;
-    const pull = async () => {
-      if (Date.now() - lastEdit.current < 4000) return;
-      try {
-        const r = await window.storage.get(SHARED_KEY, true);
-        if (r && r.value && r.value !== lastSynced.current) {
-          lastSynced.current = r.value;
-          fromRemote.current = true;
-          setData(migrate(JSON.parse(r.value)));
-          setStatus("Updated with friends' changes ✓");
-        }
-      } catch (e) {}
-    };
-    const id = setInterval(pull, 6000);
-    return () => clearInterval(id);
-  }, [loaded]);
 
   const { trip, currencies, people, days, expenses, packing } = data;
   const home = currencies[0];
@@ -311,53 +220,18 @@ export default function App() {
     if (confirm("Reset everything to the starter template? This clears it for ALL friends.")) setData(defaults());
   };
 
-  // ── travelers ──
-  const addPerson = () => setData((d) => ({ ...d, people: [...d.people, newPerson(`Person ${d.people.length + 1}`)] }));
-  const renamePerson = (i, v) =>
-    setData((d) => {
-      const old = d.people[i].name;
-      return {
-        ...d,
-        people: d.people.map((p, j) => (j === i ? { ...p, name: v } : p)),
-        packing: d.packing.map((r) => (old && r.who === old ? { ...r, who: v } : r)),
-      };
-    });
-  const removePerson = (pi) => {
-    const p = people[pi];
-    const label = p.name || "This traveler";
-    if (people.length <= 1) {
-      alert("You need at least 1 traveler.");
-      return;
-    }
-    const paidCount = expenses.filter((e) => e.paidBy === pi && num(e.amount) > 0).length;
-    if (paidCount) {
-      alert(`${label} paid for ${paidCount} expense${paidCount > 1 ? "s" : ""}. Change "Paid by" on ${paidCount > 1 ? "those" : "that"} first, then remove them.`);
-      return;
-    }
-    if (!confirm(`Remove ${label}? Their savings will be deleted and they'll be taken out of every expense split.`)) return;
+  // ── savings ──
+  const updMonth = (i, m, v) =>
     setData((d) => ({
       ...d,
-      people: d.people.filter((_, j) => j !== pi),
-      expenses: d.expenses.map((e) => ({
-        ...e,
-        paidBy: e.paidBy > pi ? e.paidBy - 1 : e.paidBy === pi ? 0 : e.paidBy,
-        split: e.split.filter((x) => x !== pi).map((x) => (x > pi ? x - 1 : x)),
-      })),
-      packing: d.packing.map((r) => (r.who === p.name ? { ...r, who: "Everyone" } : r)),
+      people: d.people.map((p, j) => {
+        if (j !== i) return p;
+        const months = [...p.months];
+        while (months.length <= m) months.push("");
+        months[m] = v;
+        return { ...p, months };
+      }),
     }));
-  };
-  const setPhoto = async (pi, file) => {
-    if (!file) return;
-    try {
-      const photo = await resizeImage(file);
-      setData((d) => ({ ...d, people: d.people.map((p, j) => (j === pi ? { ...p, photo } : p)) }));
-    } catch (e) {
-      alert("Couldn't read that image. Try a JPG or PNG photo.");
-    }
-  };
-
-  // ── savings ──
-  const updMonth = (i, m, v) => setData((d) => ({ ...d, people: d.people.map((p, j) => (j === i ? { ...p, months: p.months.map((x, k) => (k === m ? v : x)) } : p)) }));
 
   // ── itinerary ──
   const setDays = (fn) => setData((d) => ({ ...d, days: fn(d.days) }));
@@ -407,7 +281,7 @@ export default function App() {
     expenses.forEach((e) => {
       const amt = num(e.amount);
       const split = e.split.filter((i) => i < people.length);
-      if (e.settled || !amt || !split.length || e.paidBy >= people.length) return;
+      if (e.settled || !amt || !split.length) return;
       let a = amt;
       if (code === "__ALL__") a = amt * rateOf(e.cur);
       else if (e.cur !== code) return;
@@ -426,21 +300,29 @@ export default function App() {
     countdown = diff > 0 ? `${diff} day${diff === 1 ? "" : "s"} to go` : diff === 0 ? "Trip starts today" : "Trip completed";
   }
 
-  const [sy, sm] = (trip.saveStart || thisMonth()).split("-").map(Number);
-  const monthLabels = Array.from({ length: MONTHS }, (_, k) => {
+  const saveStart = trip.saveStart || thisMonth();
+  const saveEnd = trip.saveEnd || addMonths(saveStart, DEFAULT_MONTHS - 1);
+  const endBeforeStart = monthDiff(saveStart, saveEnd) < 0;
+  const nMonths = Math.max(1, Math.min(MAX_MONTHS, monthDiff(saveStart, saveEnd) + 1));
+  const [sy, sm] = saveStart.split("-").map(Number);
+  const monthLabels = Array.from({ length: nMonths }, (_, k) => {
     const d = new Date(sy, sm - 1 + k, 1);
     return { short: d.toLocaleString("en", { month: "short" }), year: String(d.getFullYear()).slice(2) };
   });
+  const firstLabel = `${monthLabels[0].short} ${monthLabels[0].year}`;
+  const lastLabel = `${monthLabels[nMonths - 1].short} ${monthLabels[nMonths - 1].year}`;
   const now = new Date();
   const curIdx = (now.getFullYear() - sy) * 12 + now.getMonth() - (sm - 1);
-  const monthly = num(trip.monthly);
-  const personTotal = (p) => p.months.reduce((s, v) => s + num(v), 0);
+  const monthly = num(trip.monthly); // minimum per person per month
+  const monthsOf = (p) => Array.from({ length: nMonths }, (_, k) => p.months[k] ?? "");
+  const personTotal = (p) => monthsOf(p).reduce((s, v) => s + num(v), 0);
   const monthTotal = (k) => people.reduce((s, p) => s + num(p.months[k]), 0);
   const totalSaved = people.reduce((s, p) => s + personTotal(p), 0);
-  const groupTarget = monthly * MONTHS * people.length;
-  const curLabel = curIdx >= 0 && curIdx < MONTHS ? `${monthLabels[curIdx].short} ${monthLabels[curIdx].year}` : null;
+  const groupTarget = monthly * nMonths * people.length;
+  const curLabel = curIdx >= 0 && curIdx < nMonths ? `${monthLabels[curIdx].short} ${monthLabels[curIdx].year}` : null;
   const paidThisMonth = curLabel ? people.filter((p) => num(p.months[curIdx]) > 0).length : 0;
-  const monthsLeft = Math.max(0, Math.min(MONTHS, MONTHS - curIdx));
+  const monthsLeft = Math.max(0, Math.min(nMonths, nMonths - curIdx));
+  const hiddenSavings = people.some((p) => p.months.slice(nMonths).some((v) => num(v) > 0));
   const cellTint = (v, k) => {
     const filled = num(v) > 0;
     if (filled && monthly > 0 && num(v) < monthly) return "bg-amber-50 text-amber-700";
@@ -467,8 +349,8 @@ export default function App() {
     { id: "packing", label: "Packing", Icon: Luggage, on: "text-sky-600 border-sky-500" },
   ];
 
-  if (!loaded) {
-    return <div className="min-h-screen bg-slate-50 flex items-center justify-center text-sm text-slate-400">Loading trip…</div>;
+  if (!ready) {
+    return <div className="min-h-screen bg-slate-50 flex items-center justify-center text-sm text-slate-400">{status === "error" ? "Couldn't load the trip. Retrying…" : "Loading trip…"}</div>;
   }
 
   return (
@@ -494,20 +376,15 @@ export default function App() {
                 <Cell type="date" value={trip.end} onChange={(v) => setTrip("end", v)} className="w-36" />
               </label>
             </div>
-            <div className="flex flex-wrap items-center gap-y-2 mt-4">
-              <button onClick={() => setShowPeople(true)} className="flex -space-x-1.5" title="Manage travelers">
+            <div className="flex items-center mt-4">
+              <div className="flex -space-x-1.5">
                 {people.map((p, i) => (
-                  <span key={p.id} title={p.name} className="ring-2 ring-white rounded-full">
-                    <Avatar person={p} i={i} />
+                  <span key={i} title={p.name} className="ring-2 ring-white rounded-full">
+                    <Avatar name={p.name} i={i} />
                   </span>
                 ))}
-              </button>
-              <span className="text-sm text-slate-500 ml-3">
-                {people.length} traveler{people.length === 1 ? "" : "s"}
-              </span>
-              <button onClick={() => setShowPeople(true)} className="ml-3 inline-flex items-center gap-1.5 text-sm font-medium text-indigo-600 hover:bg-indigo-50 px-2.5 py-1 rounded-md">
-                <Users size={15} /> Manage
-              </button>
+              </div>
+              <span className="text-sm text-slate-500 ml-3">{people.length} travelers</span>
             </div>
           </div>
         </div>
@@ -526,7 +403,7 @@ export default function App() {
             ))}
           </div>
           <div className="flex items-center gap-3 pb-2 shrink-0">
-            <span className="text-xs text-slate-400 hidden sm:inline">{status}</span>
+            <span className={`text-xs hidden sm:inline ${status === "error" ? "text-rose-500" : "text-slate-400"}`}>{STATUS_TEXT[status]}</span>
             <button onClick={reset} title="Reset" className="p-1.5 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100">
               <RotateCcw size={15} />
             </button>
@@ -542,21 +419,33 @@ export default function App() {
                   <span className="text-slate-500 font-medium">Start saving from</span>
                   <input
                     type="month"
-                    value={trip.saveStart}
+                    value={saveStart}
                     onChange={(e) => setTrip("saveStart", e.target.value || thisMonth())}
                     className="text-sm bg-slate-50 border border-slate-200 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-300"
                   />
                 </label>
                 <label className="flex items-center gap-2 text-sm">
-                  <span className="text-slate-500 font-medium">Monthly amount per person</span>
+                  <span className="text-slate-500 font-medium">Stop saving after</span>
+                  <input
+                    type="month"
+                    value={saveEnd}
+                    min={saveStart}
+                    max={addMonths(saveStart, MAX_MONTHS - 1)}
+                    onChange={(e) => setTrip("saveEnd", e.target.value || addMonths(saveStart, DEFAULT_MONTHS - 1))}
+                    className={`text-sm bg-slate-50 border rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-300 ${endBeforeStart ? "border-rose-300" : "border-slate-200"}`}
+                  />
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <span className="text-slate-500 font-medium">Minimum per person / month</span>
                   <div className="flex items-center bg-slate-50 border border-slate-200 rounded-md pl-2">
                     <span className="text-slate-400">{home.symbol}</span>
                     <Cell type="number" value={trip.monthly} onChange={(v) => setTrip("monthly", v)} className="w-32" placeholder="Not decided yet" />
                   </div>
                 </label>
                 <span className="text-xs text-slate-400">
-                  12 months · {monthLabels[0].short} {monthLabels[0].year} – {monthLabels[11].short} {monthLabels[11].year} · in {home.code}
+                  {nMonths} month{nMonths === 1 ? "" : "s"} · {firstLabel} – {lastLabel} · in {home.code}
                 </span>
+                {endBeforeStart && <span className="text-xs text-rose-500 w-full">The stop month is before the start month. Pick a later stop month.</span>}
               </div>
 
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -567,14 +456,14 @@ export default function App() {
                   accent="bg-teal-500"
                   sub={curLabel ? `${paidThisMonth} of ${people.length} have paid` : curIdx < 0 ? "Saving hasn't started" : "Saving period ended"}
                 />
-                <Stat label="Group target" value={monthly ? fmt(groupTarget) : "Not set"} accent="bg-amber-400" sub={monthly ? `${fmt(monthly * MONTHS)} per person` : "Set a monthly amount above"} />
-                <Stat label="Months left" value={monthsLeft} accent="bg-indigo-400" sub={curLabel ? `Currently month ${curIdx + 1} of 12` : null} />
+                <Stat label="Group minimum" value={monthly ? fmt(groupTarget) : "Not set"} accent="bg-amber-400" sub={monthly ? `${fmt(monthly * nMonths)} per person` : "Set a monthly minimum above"} />
+                <Stat label="Months left" value={monthsLeft} accent="bg-indigo-400" sub={curLabel ? `Currently month ${curIdx + 1} of ${nMonths}` : null} />
               </div>
 
               {monthly > 0 && (
                 <div className="bg-white rounded-xl border border-slate-200 p-4">
                   <div className="flex justify-between text-sm mb-2">
-                    <span className="font-medium text-slate-600">Progress to target</span>
+                    <span className="font-medium text-slate-600">Progress to group minimum</span>
                     <span className="font-semibold text-emerald-600">{groupTarget ? Math.round((totalSaved / groupTarget) * 100) : 0}%</span>
                   </div>
                   <Bar pct={groupTarget ? (totalSaved / groupTarget) * 100 : 0} color="bg-gradient-to-r from-emerald-400 to-teal-500" />
@@ -589,41 +478,31 @@ export default function App() {
                       {monthLabels.map((m, k) => (
                         <th key={k} className={`px-1 py-2 text-center text-xs font-semibold ${k === curIdx ? "bg-emerald-100 text-emerald-700" : "text-slate-500"}`}>
                           <div className="uppercase tracking-wide">{m.short}</div>
-                          <div className="font-normal opacity-60">&apos;{m.year}</div>
+                          <div className="font-normal opacity-60">'{m.year}</div>
                         </th>
                       ))}
-                      <TH className="text-right bg-slate-100">Total</TH>
+                      <TH className="text-right bg-slate-100">Total saved</TH>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {people.map((p, i) => {
-                      const t = personTotal(p);
-                      return (
-                        <tr key={p.id}>
-                          <td className="px-3 py-1 sticky left-0 bg-white z-10 border-r border-slate-100">
-                            <div className="flex items-center gap-2">
-                              <Avatar person={p} i={i} />
-                              <Cell value={p.name} onChange={(v) => renamePerson(i, v)} className="font-medium w-28" placeholder="Name" />
+                    {people.map((p, i) => (
+                      <tr key={i}>
+                        <td className="px-3 py-1 sticky left-0 bg-white z-10 border-r border-slate-100">
+                          <div className="flex items-center gap-2">
+                            <Avatar name={p.name} i={i} />
+                            <Cell value={p.name} onChange={(v) => upd("people", i, "name", v)} className="font-medium w-28" />
+                          </div>
+                        </td>
+                        {monthsOf(p).map((v, k) => (
+                          <td key={k} className={`p-0.5 ${k === curIdx ? "bg-emerald-50/50" : ""}`}>
+                            <div className={`rounded-md ${cellTint(v, k)}`}>
+                              <Cell type="number" value={v} onChange={(nv) => updMonth(i, k, nv)} className="w-20 text-center hover:bg-transparent" placeholder="–" />
                             </div>
                           </td>
-                          {p.months.map((v, k) => (
-                            <td key={k} className={`p-0.5 ${k === curIdx ? "bg-emerald-50/50" : ""}`}>
-                              <div className={`rounded-md ${cellTint(v, k)}`}>
-                                <Cell type="number" value={v} onChange={(nv) => updMonth(i, k, nv)} className="w-20 text-center hover:bg-transparent" placeholder="–" />
-                              </div>
-                            </td>
-                          ))}
-                          <td className="px-3 text-sm text-right font-semibold bg-slate-50">
-                            {fmt(t)}
-                            {monthly > 0 && (
-                              <div className="mt-1 w-20 ml-auto">
-                                <Bar pct={(t / (monthly * MONTHS)) * 100} color="bg-emerald-500" />
-                              </div>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
+                        ))}
+                        <td className="px-3 text-sm text-right font-semibold bg-slate-50">{fmt(personTotal(p))}</td>
+                      </tr>
+                    ))}
                   </tbody>
                   <tfoot className="border-t-2 border-slate-200 bg-slate-50">
                     <tr>
@@ -639,27 +518,23 @@ export default function App() {
                 </table>
               </div>
 
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex flex-wrap gap-4 text-xs text-slate-500">
+              <div className="flex flex-wrap gap-4 text-xs text-slate-500">
+                <span className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded bg-emerald-100 border border-emerald-200" /> Paid
+                </span>
+                {monthly > 0 && (
                   <span className="flex items-center gap-1.5">
-                    <span className="w-3 h-3 rounded bg-emerald-100 border border-emerald-200" /> Paid
+                    <span className="w-3 h-3 rounded bg-amber-100 border border-amber-200" /> Below the {fmt(monthly)} minimum
                   </span>
-                  {monthly > 0 && (
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-3 h-3 rounded bg-amber-100 border border-amber-200" /> Paid less than {fmt(monthly)}
-                    </span>
-                  )}
-                  <span className="flex items-center gap-1.5">
-                    <span className="w-3 h-3 rounded bg-rose-100 border border-rose-200" /> Missed (past month)
-                  </span>
-                  <span className="flex items-center gap-1.5">
-                    <span className="w-3 h-3 rounded bg-emerald-200" /> Current month
-                  </span>
-                </div>
-                <button onClick={() => setShowPeople(true)} className="inline-flex items-center gap-1.5 text-sm font-medium text-emerald-600 hover:bg-emerald-50 px-2.5 py-1 rounded-md">
-                  <Users size={15} /> Add / remove travelers
-                </button>
+                )}
+                <span className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded bg-rose-100 border border-rose-200" /> Missed (past month)
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded bg-emerald-200" /> Current month
+                </span>
               </div>
+              {hiddenSavings && <p className="text-xs text-amber-600">Some amounts were entered for months after {lastLabel}. They're hidden and not counted, but they come back if you move the stop month later.</p>}
             </div>
           )}
 
@@ -779,7 +654,7 @@ export default function App() {
                 <div className="text-sm font-semibold text-slate-700 mb-3">Currencies & exchange rates</div>
                 <div className="flex flex-wrap gap-3">
                   {currencies.map((c, ci) => (
-                    <div key={ci} className={`flex items-center gap-1 rounded-lg border px-2 py-1 ${ci === 0 ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-slate-50"}`}>
+                    <div key={c.id || ci} className={`flex items-center gap-1 rounded-lg border px-2 py-1 ${ci === 0 ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-slate-50"}`}>
                       <Cell value={c.code} onChange={(v) => updCur(ci, "code", v.toUpperCase())} className="w-14 font-semibold" placeholder="CODE" />
                       <Cell value={c.symbol} onChange={(v) => updCur(ci, "symbol", v)} className="w-12" placeholder="Sym" />
                       {ci === 0 ? (
@@ -794,11 +669,14 @@ export default function App() {
                       )}
                     </div>
                   ))}
-                  <button onClick={() => add("currencies", { code: "", symbol: "", rate: "" })} className="inline-flex items-center gap-1 text-sm text-amber-600 hover:bg-amber-50 px-3 rounded-lg border border-dashed border-amber-300">
+                  <button
+                    onClick={() => add("currencies", { id: uid(), code: "", symbol: "", rate: "" })}
+                    className="inline-flex items-center gap-1 text-sm text-amber-600 hover:bg-amber-50 px-3 rounded-lg border border-dashed border-amber-300"
+                  >
                     <Plus size={14} /> Currency
                   </button>
                 </div>
-                {missingRate && <div className="text-xs text-rose-500 mt-2">Some currencies have no exchange rate yet, so combined totals won&apos;t include them correctly.</div>}
+                {missingRate && <div className="text-xs text-rose-500 mt-2">Some currencies have no exchange rate yet, so combined totals won't include them correctly.</div>}
               </div>
 
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -853,8 +731,8 @@ export default function App() {
                           <td className="px-2">
                             <Select value={e.paidBy} onChange={(v) => upd("expenses", i, "paidBy", Number(v))} className="bg-slate-100">
                               {people.map((p, j) => (
-                                <option key={p.id} value={j}>
-                                  {p.name || `Person ${j + 1}`}
+                                <option key={j} value={j}>
+                                  {p.name}
                                 </option>
                               ))}
                             </Select>
@@ -862,8 +740,8 @@ export default function App() {
                           <td className="px-2">
                             <div className="flex items-center gap-1">
                               {people.map((p, j) => (
-                                <button key={p.id} title={p.name} onClick={() => toggleSplit(i, j)}>
-                                  <Avatar person={p} i={j} size="w-6 h-6 text-xs" className={e.split.includes(j) ? "" : "opacity-20 grayscale"} />
+                                <button key={j} title={p.name} onClick={() => toggleSplit(i, j)}>
+                                  <Avatar name={p.name} i={j} size="w-6 h-6 text-xs" className={e.split.includes(j) ? "" : "opacity-20 grayscale"} />
                                 </button>
                               ))}
                               <button onClick={() => setSplitAll(i, n !== people.length)} className="text-xs text-slate-400 hover:text-slate-600 ml-1 w-10">
@@ -932,10 +810,10 @@ export default function App() {
                             {tr.length === 0 && <div className="text-sm text-slate-400 px-3 py-3">Nothing to pay back.</div>}
                             {tr.map((t, k) => (
                               <div key={k} className="flex items-center gap-2 px-3 py-2.5 text-sm">
-                                <Avatar person={people[t.from]} i={t.from} size="w-6 h-6 text-xs" />
+                                <Avatar name={people[t.from].name} i={t.from} size="w-6 h-6 text-xs" />
                                 <span className="font-medium">{people[t.from].name}</span>
                                 <ArrowRight size={14} className="text-slate-400" />
-                                <Avatar person={people[t.to]} i={t.to} size="w-6 h-6 text-xs" />
+                                <Avatar name={people[t.to].name} i={t.to} size="w-6 h-6 text-xs" />
                                 <span className="font-medium">{people[t.to].name}</span>
                                 <span className="ml-auto font-semibold text-rose-600">{fmt(t.amt, g.fmtCode)}</span>
                               </div>
@@ -984,7 +862,7 @@ export default function App() {
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {packing.map((r, i) => (
-                      <tr key={i} className="hover:bg-slate-50/60">
+                      <tr key={r.id || i} className="hover:bg-slate-50/60">
                         <td className="px-3 py-1.5">
                           <button
                             onClick={() => upd("packing", i, "done", !r.done)}
@@ -999,8 +877,8 @@ export default function App() {
                         <td className="px-3">
                           <Select value={r.who} onChange={(v) => upd("packing", i, "who", v)} className="bg-slate-100">
                             <option value="Everyone">Everyone</option>
-                            {people.map((p) => (
-                              <option key={p.id} value={p.name}>
+                            {people.map((p, j) => (
+                              <option key={j} value={p.name}>
                                 {p.name}
                               </option>
                             ))}
@@ -1014,70 +892,13 @@ export default function App() {
                   </tbody>
                 </table>
               </div>
-              <Btn color="bg-sky-500 hover:bg-sky-600" onClick={() => add("packing", { item: "", who: "Everyone", done: false })}>
+              <Btn color="bg-sky-500 hover:bg-sky-600" onClick={() => add("packing", { id: uid(), item: "", who: "Everyone", done: false })}>
                 <Plus size={16} /> Add item
               </Btn>
             </div>
           )}
         </div>
       </div>
-
-      {/* ═════════ TRAVELERS MODAL ═════════ */}
-      {showPeople && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 flex items-center justify-center p-4" onClick={() => setShowPeople(false)}>
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200">
-              <div>
-                <div className="font-semibold text-slate-800">Travelers</div>
-                <div className="text-xs text-slate-400">
-                  {people.length} {people.length === 1 ? "person" : "people"} · tap a photo to change it
-                </div>
-              </div>
-              <button onClick={() => setShowPeople(false)} className="p-1.5 rounded-md text-slate-400 hover:bg-slate-100">
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="overflow-y-auto divide-y divide-slate-100 px-2">
-              {people.map((p, i) => (
-                <div key={p.id} className="flex items-center gap-3 px-3 py-2.5">
-                  <label className="relative cursor-pointer group shrink-0" title="Upload photo">
-                    <Avatar person={p} i={i} size="w-11 h-11 text-base" />
-                    <span className="absolute inset-0 rounded-full bg-black/40 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition">
-                      <Camera size={16} />
-                    </span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={(e) => {
-                        setPhoto(i, e.target.files && e.target.files[0]);
-                        e.target.value = "";
-                      }}
-                    />
-                  </label>
-                  <Cell value={p.name} onChange={(v) => renamePerson(i, v)} className="font-medium" placeholder="Name" />
-                  {p.photo && (
-                    <button onClick={() => upd("people", i, "photo", "")} className="text-xs text-slate-400 hover:text-slate-600 whitespace-nowrap">
-                      Remove photo
-                    </button>
-                  )}
-                  <Del onClick={() => removePerson(i)} title="Remove traveler" />
-                </div>
-              ))}
-            </div>
-
-            <div className="flex items-center justify-between px-5 py-4 border-t border-slate-200">
-              <Btn onClick={addPerson} color="bg-indigo-500 hover:bg-indigo-600">
-                <UserPlus size={16} /> Add traveler
-              </Btn>
-              <button onClick={() => setShowPeople(false)} className="text-sm font-medium text-slate-500 hover:text-slate-700 px-3 py-2">
-                Done
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
