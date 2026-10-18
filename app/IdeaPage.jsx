@@ -335,4 +335,3 @@ export default function IdeaPage({ idea, people, cities, days, me, needMe, setMe
     </div>
   );
 }
-s;
