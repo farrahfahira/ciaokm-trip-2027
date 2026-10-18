@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Plus, Trash2, X, Check, ChevronRight, ExternalLink } from "lucide-react";
-import { num, Avatar } from "./shared";
+import { num, Avatar, MoneyInput } from "./shared";
 
 const uid = () => Math.random().toString(36).slice(2, 9);
 const isUrl = (s) => /^https?:\/\//i.test(String(s || "").trim());
@@ -226,13 +226,12 @@ export function ItineraryMobile({ days, setDays }) {
 
 // ── Nabung versi HP ──
 // ── Kotak isi setoran (muncul di tengah) ──
+// ── Kotak isi setoran (muncul di tengah) ──
 export function AmountDialog({ title, subtitle, value, monthly, fmt, onSave, onClose }) {
-  const [v, setV] = useState(value === "" || value == null ? "" : String(value));
-  const inputRef = useRef(null);
+  const [v, setV] = useState(value === "" || value == null ? "" : Number(value));
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
   useEffect(() => {
-    inputRef.current?.focus();
     const onKey = (e) => {
       if (e.key === "Escape") closeRef.current();
     };
@@ -270,18 +269,16 @@ export function AmountDialog({ title, subtitle, value, monthly, fmt, onSave, onC
 
         <div className="text-3xl font-bold text-slate-800 tabular-nums">{n > 0 ? fmt(n) : <span className="text-slate-300">{fmt(0)}</span>}</div>
 
-        <input
-          ref={inputRef}
-          type="number"
-          inputMode="numeric"
+        <MoneyInput
+          autoFocus
           value={v}
-          onChange={(e) => setV(e.target.value)}
+          onChange={setV}
           placeholder="Ketik jumlahnya"
           className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-300 placeholder:text-slate-400"
         />
 
         {monthly > 0 && n !== monthly && (
-          <button type="button" onClick={() => setV(String(monthly))} className="text-sm font-medium text-emerald-700 bg-emerald-50 active:bg-emerald-100 px-3 py-2 rounded-lg">
+          <button type="button" onClick={() => setV(monthly)} className="text-sm font-medium text-emerald-700 bg-emerald-50 active:bg-emerald-100 px-3 py-2 rounded-lg">
             Minimal {fmt(monthly)}
           </button>
         )}
@@ -303,7 +300,6 @@ export function AmountDialog({ title, subtitle, value, monthly, fmt, onSave, onC
     </div>
   );
 }
-
 // ── Nabung versi HP ──
 export function SaveMobile({ people, activeIdx, monthLabels, curIdx, monthly, monthsOf, personTotal, updMonth, fmt }) {
   const [open, setOpen] = useState(null); // orang yang bulan-bulannya lagi dibuka

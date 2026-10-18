@@ -9,7 +9,7 @@ import MemberPage from "./MemberPage";
 import ManagePanel from "./ManagePanel";
 import BudgetTab from "./BudgetTab";
 import { ItineraryMobile, SaveMobile, PackingMobile } from "./MobileViews";
-import { NO_DECIMALS, FUND, num, isFund, normCat, Avatar } from "./shared";
+import { NO_DECIMALS, FUND, num, isFund, normCat, Avatar, MoneyInput } from "./shared";
 
 const ME_KEY = "trip-planner-me";
 const DAY_TINT = ["bg-indigo-100 text-indigo-700", "bg-emerald-100 text-emerald-700", "bg-amber-100 text-amber-700", "bg-rose-100 text-rose-700", "bg-sky-100 text-sky-700", "bg-violet-100 text-violet-700"];
@@ -133,17 +133,13 @@ const migrate = (s) => {
   return out;
 };
 
-const Cell = ({ value, onChange, type = "text", className = "", placeholder = "", autoFocus, onBlur }) => (
-  <input
-    type={type}
-    value={value}
-    placeholder={placeholder}
-    autoFocus={autoFocus}
-    onBlur={onBlur}
-    onChange={(e) => onChange(type === "number" ? (e.target.value === "" ? "" : Number(e.target.value)) : e.target.value)}
-    className={`w-full bg-transparent px-2 py-1.5 rounded-md text-sm hover:bg-slate-100/70 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300 placeholder:text-slate-300 ${className}`}
-  />
-);
+const Cell = ({ value, onChange, type = "text", className = "", placeholder = "", autoFocus, onBlur }) => {
+  const cls = `w-full bg-transparent px-2 py-1.5 rounded-md text-sm hover:bg-slate-100/70 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300 placeholder:text-slate-300 ${className}`;
+  if (type === "number") {
+    return <MoneyInput value={value} onChange={onChange} placeholder={placeholder} autoFocus={autoFocus} onBlur={onBlur} className={cls} />;
+  }
+  return <input type={type} value={value} placeholder={placeholder} autoFocus={autoFocus} onBlur={onBlur} onChange={(e) => onChange(e.target.value)} className={cls} />;
+};
 
 const Bar = ({ pct, color }) => (
   <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
@@ -327,7 +323,7 @@ export default function App() {
   const fmt = (n, code = home.code) => {
     const c = curOf(code);
     const dec = decOf(c.code);
-    return `${c.symbol}${num(n).toLocaleString("id-ID", { minimumFractionDigits: 0, maximumFractionDigits: dec })}`;
+    return `${c.symbol}${num(n).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: dec })}`;
   };
   const updCur = (ci, f, v) =>
     setData((d) => {
@@ -560,14 +556,14 @@ export default function App() {
               </div>
 
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <Stat label="Total tabungan" value={fmt(totalSaved)} accent="bg-emerald-500" sub={`Rata-rata ${fmt(totalSaved / activeCount)}`} />
+                <Stat label="Total tabungan" value={fmt(totalSaved)} accent="bg-emerald-500" />
                 <Stat
                   label={curLabel ? `Terkumpul ${curLabel}` : "Bulan ini"}
                   value={curLabel ? fmt(monthTotal(curIdx)) : "–"}
                   accent="bg-teal-500"
                   sub={curLabel ? `${paidThisMonth} dari ${activeIdx.length} udah setor` : curIdx < 0 ? "Belum mulai" : "Periode udah selesai"}
                 />
-                <Stat label="Target minimal" value={monthly ? fmt(groupTarget) : "Belum diatur"} accent="bg-amber-400" sub={monthly ? `${fmt(monthly * nMonths)} per orang` : null} />
+                <Stat label="Target minimal per orang" value={monthly ? fmt(monthly * nMonths) : "Belum diatur"} accent="bg-amber-400" />
                 <Stat label="Sisa bulan" value={monthsLeft} accent="bg-indigo-400" sub={curLabel ? `Bulan ke-${curIdx + 1} dari ${nMonths}` : null} />
               </div>
 

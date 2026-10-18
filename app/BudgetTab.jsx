@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { Plus, Settings2, Trash2, X } from "lucide-react";
 import ExpensePage from "./ExpensePage";
-import { CATS, CAT_LABEL, CAT_TINT, FUND, num, isFund, normCat, sharesOf, Avatar } from "./shared";
+import { CATS, CAT_LABEL, CAT_TINT, FUND, num, isFund, normCat, sharesOf, Avatar, MoneyInput } from "./shared";
 
 const uid = () => Math.random().toString(36).slice(2, 9);
 
@@ -66,7 +66,7 @@ function ExpenseEditor({ draft, setDraft, error, people, activeIdx, isActive, cu
                 </option>
               ))}
             </select>
-            <input type="number" inputMode="decimal" value={draft.amount} placeholder="0" onChange={(ev) => set("amount", ev.target.value === "" ? "" : Number(ev.target.value))} className={field} />
+            <MoneyInput value={draft.amount} onChange={(v) => set("amount", v)} placeholder="0" className={field} />
           </div>
         </div>
 
@@ -197,10 +197,14 @@ export default function BudgetTab({
     }));
     setEditing(null);
   };
-  const deleteExpense = () => {
-    if (!confirm(`Hapus "${editing.item || "pengeluaran ini"}"?`)) return;
+  const removeExpense = (exp) => {
+    if (!confirm(`Hapus "${exp.item || "pengeluaran ini"}"?`)) return false;
+    setData((s) => ({ ...s, expenses: s.expenses.filter((x) => x.id !== exp.id) }));
+    return true;
+  };
+  const deleteFromEditor = () => {
     const id = editing.id;
-    setData((s) => ({ ...s, expenses: s.expenses.filter((x) => x.id !== id) }));
+    if (!removeExpense(editing)) return;
     setEditing(null);
     if (expenseId === id) closeExpense();
   };
@@ -216,7 +220,7 @@ export default function BudgetTab({
       currencies={currencies}
       fmt={fmt}
       onSave={saveExpense}
-      onDelete={deleteExpense}
+      onDelete={deleteFromEditor}
       onClose={() => setEditing(null)}
     />
   );
@@ -227,7 +231,18 @@ export default function BudgetTab({
     return (
       <>
         {exp ? (
-          <ExpensePage expense={exp} people={people} fmt={fmt} onBack={closeExpense} onEdit={() => openEditor({ ...exp, paid: { ...(exp.paid || {}) } })} onSetPaid={onSetPaid} onOpenMember={openMember} />
+          <ExpensePage
+            expense={exp}
+            people={people}
+            fmt={fmt}
+            onBack={closeExpense}
+            onEdit={() => openEditor({ ...exp, paid: { ...(exp.paid || {}) } })}
+            onDelete={() => {
+              if (removeExpense(exp)) closeExpense();
+            }}
+            onSetPaid={onSetPaid}
+            onOpenMember={openMember}
+          />
         ) : (
           <div className="bg-white rounded-xl border border-slate-200 p-10 text-center space-y-3">
             <p className="text-sm text-slate-500">Pengeluaran ini udah dihapus.</p>
@@ -301,13 +316,7 @@ export default function BudgetTab({
                 ) : (
                   <>
                     <span className="text-xs text-slate-500">1 {c.code || "?"} =</span>
-                    <input
-                      type="number"
-                      value={c.rate}
-                      onChange={(ev) => updCur(ci, "rate", ev.target.value === "" ? "" : Number(ev.target.value))}
-                      placeholder="kurs"
-                      className="w-24 bg-slate-50 border border-slate-200 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-amber-300"
-                    />
+                    <MoneyInput value={c.rate} onChange={(v) => updCur(ci, "rate", v)} placeholder="kurs" className="w-28 bg-slate-50 border border-slate-200 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-amber-300" />
                     <span className="text-xs text-slate-500">{home.code}</span>
                     <button onClick={() => delCur(ci)} title="Hapus" className="p-1.5 rounded-md text-slate-300 hover:text-rose-500 hover:bg-rose-50">
                       <Trash2 size={14} />

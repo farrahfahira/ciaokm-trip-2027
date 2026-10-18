@@ -1,9 +1,9 @@
 "use client";
 
-import { ArrowLeft, Check, Pencil } from "lucide-react";
+import { ArrowLeft, Check, Pencil, Trash2 } from "lucide-react";
 import { CAT_LABEL, CAT_TINT, normCat, isFund, num, fmtDay, Avatar } from "./shared";
 
-export default function ExpensePage({ expense: e, people, fmt, onBack, onEdit, onSetPaid, onOpenMember }) {
+export default function ExpensePage({ expense: e, people, fmt, onBack, onEdit, onDelete, onSetPaid, onOpenMember }) {
   const n = people.length;
   const split = e.split.filter((j) => j < n);
   const each = split.length ? num(e.amount) / split.length : 0;
@@ -35,12 +35,15 @@ export default function ExpensePage({ expense: e, people, fmt, onBack, onEdit, o
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200 p-5 md:p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <button onClick={onBack} className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 hover:bg-slate-100 px-3 py-1.5 -ml-3 rounded-lg">
+      <div className="flex items-center gap-1">
+        <button onClick={onBack} className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 hover:bg-slate-100 px-3 py-2 -ml-3 rounded-lg">
           <ArrowLeft size={15} /> Kembali
         </button>
-        <button onClick={onEdit} className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 hover:bg-slate-100 px-3 py-1.5 -mr-3 rounded-lg">
+        <button onClick={onEdit} className="ml-auto inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 hover:bg-slate-100 px-3 py-2 rounded-lg">
           <Pencil size={14} /> Ubah
+        </button>
+        <button onClick={onDelete} className="inline-flex items-center gap-1.5 text-sm text-slate-400 hover:text-rose-500 hover:bg-rose-50 px-3 py-2 -mr-3 rounded-lg">
+          <Trash2 size={14} /> Hapus
         </button>
       </div>
 
@@ -96,12 +99,12 @@ export default function ExpensePage({ expense: e, people, fmt, onBack, onEdit, o
                     <button
                       onClick={() => (e.paid && e.paid[j] ? unmark(j) : null)}
                       title={markText(j)}
-                      className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-md hover:bg-emerald-100"
+                      className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 bg-emerald-50 px-2.5 py-1.5 rounded-md hover:bg-emerald-100"
                     >
                       <Check size={13} /> Lunas
                     </button>
                   ) : (
-                    <button onClick={() => mark(j)} className="text-xs font-medium text-emerald-700 border border-emerald-200 hover:bg-emerald-50 px-2.5 py-1 rounded-md">
+                    <button onClick={() => mark(j)} className="text-xs font-medium text-emerald-700 border border-emerald-200 hover:bg-emerald-50 px-2.5 py-1.5 rounded-md">
                       Tandai lunas
                     </button>
                   )}

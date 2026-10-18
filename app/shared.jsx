@@ -1,3 +1,7 @@
+"use client";
+
+import { useEffect, useState } from "react";
+
 // Helper yang dipakai di banyak file
 
 export const AVATAR = ["bg-rose-400", "bg-orange-400", "bg-amber-400", "bg-emerald-500", "bg-teal-500", "bg-sky-500", "bg-indigo-500", "bg-violet-500"];
@@ -36,6 +40,50 @@ export const sharesOf = (e, n) => {
   return split.filter((j) => j !== e.paidBy).map((j) => ({ e, from: j, to: e.paidBy, amount: each, cur: e.cur, paid: isPaidBack(e, j), mark: (e.paid && e.paid[j]) || null }));
 };
 export const allShares = (expenses, n) => expenses.flatMap((e) => sharesOf(e, n));
+
+// Format angka pas diketik: 1500000 → 1,500,000 (desimal pakai titik, maks 2 angka)
+export const formatInput = (raw) => {
+  const s = String(raw ?? "").replace(/[^\d.]/g, "");
+  const dot = s.indexOf(".");
+  const int = (dot === -1 ? s : s.slice(0, dot)).replace(/^0+(?=\d)/, "");
+  const dec =
+    dot === -1
+      ? ""
+      : "." +
+        s
+          .slice(dot + 1)
+          .replace(/\./g, "")
+          .slice(0, 2);
+  return int.replace(/\B(?=(\d{3})+(?!\d))/g, ",") + dec;
+};
+const toNum = (t) => {
+  const s = t.replace(/,/g, "");
+  return s === "" || s === "." ? "" : Number(s);
+};
+const toText = (v) => (v === "" || v == null ? "" : formatInput(String(v)));
+
+// Kolom isian jumlah uang, otomatis pakai koma tiap tiga angka
+export function MoneyInput({ value, onChange, className = "", ...rest }) {
+  const [text, setText] = useState(() => toText(value));
+  useEffect(() => {
+    const theirs = value === "" || value == null ? "" : Number(value);
+    if (toNum(text) !== theirs) setText(toText(value));
+  }, [value]);
+  return (
+    <input
+      {...rest}
+      type="text"
+      inputMode="decimal"
+      value={text}
+      className={className}
+      onChange={(e) => {
+        const t = formatInput(e.target.value);
+        setText(t);
+        onChange(toNum(t));
+      }}
+    />
+  );
+}
 
 // Foto profil kalau ada, kalau nggak lingkaran warna dengan huruf depan
 export const Avatar = ({ name, i, photo, size = "w-7 h-7 text-xs", className = "" }) =>
