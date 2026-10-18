@@ -5,7 +5,7 @@ import { Plus, Trash2, MapPin, Calendar, PiggyBank, CalendarDays, Wallet, Luggag
 import { useSharedTrip } from "./useSharedTrip";
 import IdeasTab from "./IdeasTab";
 import HistoryPanel from "./HistoryPanel";
-import MemberPage from "./MemberPage";
+import ProfilePage from "./ProfilePage";
 import ManagePanel from "./ManagePanel";
 import BudgetTab from "./BudgetTab";
 import PackingTab from "./PackingTab";
@@ -13,10 +13,10 @@ import { ItineraryMobile, SaveMobile } from "./MobileViews";
 import { NO_DECIMALS, FUND, num, isFund, normCat, Avatar, MoneyInput } from "./shared";
 
 const ME_KEY = "trip-planner-me";
+const PLAN_KEY = "trip-planner-plan";
 const DAY_TINT = ["bg-indigo-100 text-indigo-700", "bg-emerald-100 text-emerald-700", "bg-amber-100 text-amber-700", "bg-rose-100 text-rose-700", "bg-sky-100 text-sky-700", "bg-violet-100 text-violet-700"];
 const DEFAULT_MONTHS = 12;
 const MAX_MONTHS = 60;
-const PACK_KEYS = ["docs", "clothes", "toiletries", "electronics", "meds", "food", "other"];
 
 const uid = () => Math.random().toString(36).slice(2, 9);
 const blankMonths = () => Array(DEFAULT_MONTHS).fill("");
@@ -68,7 +68,7 @@ const defaults = () => {
 };
 
 // Ubah data lama ke format sekarang.
-// ID yang belum ada dibikin tetap, jadi semua HP hasilnya sama.
+// ID yang belum ada dibuat tetap, jadi semua perangkat hasilnya sama.
 const migrate = (s) => {
   const d = defaults();
   const t = s.trip || {};
@@ -123,8 +123,7 @@ const migrate = (s) => {
   });
   delete out.payments;
   delete out.trip.settleMode;
-  // Bawaan: format lama (who = nama / "Everyone") → Pribadi/Bersama, terhubung ke orangnya
-  // Bawaan → Pribadi (punya satu orang) atau Bersama (satu buat semua)
+  // Bawaan → Pribadi (punya satu orang) atau Bersama (satu untuk semua)
   const OLD_CATS = { docs: "Dokumen", clothes: "Pakaian", toiletries: "Perlengkapan mandi", electronics: "Elektronik", meds: "Obat", food: "Makanan" };
   const pc = s.packCats && typeof s.packCats === "object" ? s.packCats : {};
   out.packCats = {
@@ -146,7 +145,6 @@ const migrate = (s) => {
     if (!out.packCats.shared.some((c) => c.id === cid)) out.packCats.shared.push({ id: cid, name: OLD_CATS[key] });
     return cid;
   };
-  // Barang Pribadi buat banyak orang → dipecah jadi satu per orang
   const perPerson = (p, list, doneOf) => list.map((j) => ({ id: `${p.id}-${j}`, item: p.item || "", type: "personal", owner: j, cat: "", done: doneOf(j) }));
   out.packing = (s.packing || d.packing).flatMap((raw, i) => {
     const p = { ...raw, id: raw.id || `pk-${i}` };
@@ -160,7 +158,6 @@ const migrate = (s) => {
     if (p.type === "shared") {
       return [{ id: p.id, item: p.item || "", type: "shared", who: Array.isArray(p.who) ? p.who : [], cat: sharedCat(p.cat), done: p.done && typeof p.done === "object" ? p.done : {} }];
     }
-    // format paling lama: who = nama / "Everyone"
     if (!p.who || p.who === "Everyone") return perPerson(p, activeNow, () => false);
     const idx = findPerson(p.who);
     return [{ id: p.id, item: p.item || "", type: "shared", who: idx >= 0 ? [idx] : [], cat: "", done: idx >= 0 && p.done === true ? { [idx]: true } : {} }];
@@ -215,21 +212,23 @@ const STATUS_TEXT = {
   saving: "Menyimpan…",
   saved: "Tersimpan",
   updated: "Diperbarui",
-  error: "Belum tersimpan, nyoba lagi",
+  error: "Belum tersimpan, mencoba lagi",
 };
 
 export default function App() {
   const { trip: data, update: setData, status, ready } = useSharedTrip(defaults, migrate);
-  const [tab, setTab] = useState("itinerary");
+  const [tab, setTab] = useState("save");
+  const [planSub, setPlanSub] = useState("ideas");
   const [linkEdit, setLinkEdit] = useState(null);
   const [showHistory, setShowHistory] = useState(false);
   const [showManage, setShowManage] = useState(false);
   const [memberIdx, setMemberIdx] = useState(null);
   const [expenseId, setExpenseId] = useState(null);
   const [meIdx, setMeIdx] = useState(null);
+  const [meLoaded, setMeLoaded] = useState(false);
   const hashDepth = useRef(0);
 
-  // Link: #idea-… buka tab Ide, #member-N buka halaman anggota, #expense-… buka halaman pengeluaran
+  // Link: #idea-… buka Ide, #member-N buka profil anggota, #expense-… buka halaman pengeluaran
   useEffect(() => {
     const check = () => {
       const h = window.location.hash;
@@ -246,11 +245,17 @@ export default function App() {
     return () => window.removeEventListener("hashchange", check);
   }, []);
   useEffect(() => {
+    const v = localStorage.getItem(PLAN_KEY);
+    if (v === "ideas" || v === "itinerary") setPlanSub(v);
+  }, []);
+  useEffect(() => {
     if (memberIdx !== null || expenseId) window.scrollTo({ top: 0 });
   }, [memberIdx, expenseId]);
+  // Profil yang dipakai di perangkat ini
   useEffect(() => {
     const v = localStorage.getItem(ME_KEY);
     setMeIdx(v !== null && v !== "" ? Number(v) : null);
+    setMeLoaded(true);
   }, [tab, memberIdx]);
   const setMe = (v) => {
     if (v === null) localStorage.removeItem(ME_KEY);
@@ -280,9 +285,14 @@ export default function App() {
 
   const activeIdx = people.map((_, i) => i).filter((i) => !people[i].removed);
   const isActive = (i) => !!people[i] && !people[i].removed;
+  const meActive = meIdx !== null && isActive(meIdx);
 
   const goTab = (id) => {
     setTab(id);
+    if (id === "ideas" || id === "itinerary") {
+      setPlanSub(id);
+      localStorage.setItem(PLAN_KEY, id);
+    }
     if (viewingMember || expenseId) closeHash();
     window.scrollTo({ top: 0 });
   };
@@ -290,7 +300,6 @@ export default function App() {
   // ── updater umum ──
   const setTrip = (f, v) => setData((d) => ({ ...d, trip: { ...d.trip, [f]: v } }));
   const upd = (k, i, f, v) => setData((d) => ({ ...d, [k]: d[k].map((r, j) => (j === i ? { ...r, [f]: v } : r)) }));
-  const setPacking = (fn) => setData((d) => ({ ...d, packing: fn(d.packing) }));
   const restore = (snapshot) => setData(migrate(snapshot), { reason: "restore" });
 
   // ── tanda lunas: [{ id: pengeluaran, j: orang }] ──
@@ -316,7 +325,7 @@ export default function App() {
       alert("Minimal harus ada satu anggota.");
       return;
     }
-    if (!confirm(`Keluarin ${people[i].name} dari trip?\n\nTabungan dan pengeluarannya tetap tercatat. Bisa dibalikin dari Atur.`)) return;
+    if (!confirm(`Keluarkan ${people[i].name} dari trip?\n\nTabungan dan pengeluarannya tetap tercatat. Bisa dikembalikan dari Atur.`)) return;
     upd("people", i, "removed", true);
   };
   const restorePerson = (i) => upd("people", i, "removed", false);
@@ -426,6 +435,7 @@ export default function App() {
   });
   const homeEps = decOf(home.code) === 0 ? 0.5 : 0.005;
 
+  // Laptop: lima tab di atas. HP: navigasi bawah dengan Rencana (Ide + Itinerary) dan Profil.
   const tabs = [
     { id: "save", label: "Nabung", Icon: PiggyBank, on: "text-emerald-600 border-emerald-500" },
     { id: "ideas", label: "Ide", Icon: Lightbulb, on: "text-violet-600 border-violet-500" },
@@ -433,10 +443,77 @@ export default function App() {
     { id: "budget", label: "Pengeluaran", Icon: Wallet, on: "text-amber-600 border-amber-500" },
     { id: "packing", label: "Bawaan", Icon: Luggage, on: "text-sky-600 border-sky-500" },
   ];
+  const navItems = [
+    { id: "save", label: "Nabung", Icon: PiggyBank, color: "text-emerald-600" },
+    { id: "plan", label: "Rencana", Icon: CalendarDays, color: "text-indigo-600" },
+    { id: "budget", label: "Pengeluaran", Icon: Wallet, color: "text-amber-600" },
+    { id: "packing", label: "Bawaan", Icon: Luggage, color: "text-sky-600" },
+    { id: "profile", label: "Profil", color: "text-violet-600" },
+  ];
+  const navActive = (id) => !viewingMember && (id === "plan" ? tab === "ideas" || tab === "itinerary" : tab === id);
+  const isPlan = tab === "ideas" || tab === "itinerary";
 
   if (!ready) {
-    return <div className="min-h-screen bg-slate-50 flex items-center justify-center text-sm text-slate-400">{status === "error" ? "Gagal memuat. Nyoba lagi…" : "Memuat…"}</div>;
+    return <div className="min-h-screen bg-slate-50 flex items-center justify-center text-sm text-slate-400">{status === "error" ? "Gagal memuat. Mencoba lagi…" : "Memuat…"}</div>;
   }
+
+  // ── Pilih profil (sekali per perangkat) ──
+  if (meLoaded && !meActive) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
+        <div className="w-full max-w-md">
+          <div className="text-center mb-6">
+            <div className="text-sm text-slate-400">{trip.name}</div>
+            <h1 className="text-2xl font-bold text-slate-800 mt-1">Pilih profil</h1>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            {activeIdx.map((i) => (
+              <button key={people[i].id || i} onClick={() => setMe(i)} className="flex flex-col items-center gap-2 p-3 rounded-2xl bg-white border border-slate-200 hover:border-indigo-300 active:bg-slate-50 transition">
+                <Avatar name={people[i].name} i={i} photo={people[i].photo} size="w-16 h-16 text-xl" />
+                <span className="text-sm font-medium text-slate-700 truncate max-w-full">{people[i].name}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const profileProps = {
+    people,
+    expenses,
+    packing,
+    packCats: data.packCats,
+    activeIdx,
+    isActive,
+    meIdx,
+    monthLabels,
+    curIdx,
+    monthly,
+    personTotal,
+    fundShare,
+    fmt,
+    rateOf,
+    homeEps,
+    updMonth,
+    onSetPaid: setPaidMany,
+    setData,
+    onOpenExpense: openExpense,
+    onSwitchProfile: () => setMe(null),
+  };
+
+  const PlanSwitch = () => (
+    <div className="md:hidden flex bg-white border border-slate-200 rounded-xl p-1 gap-1 mb-3">
+      {[
+        { id: "ideas", label: "Ide" },
+        { id: "itinerary", label: "Itinerary" },
+      ].map((o) => (
+        <button key={o.id} onClick={() => goTab(o.id)} className={`flex-1 py-2 rounded-lg text-sm font-medium transition ${tab === o.id ? "bg-indigo-500 text-white" : "text-slate-500"}`}>
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-700 px-4 pt-4 pb-28 md:p-8">
@@ -480,7 +557,7 @@ export default function App() {
           </div>
         </div>
 
-        {/* Tab (laptop) + status */}
+        {/* Tab (laptop) + status + profil */}
         <div className="flex items-end justify-between mt-4 md:mt-6 md:border-b border-slate-200">
           <div className="hidden md:flex gap-1">
             {tabs.map(({ id, label, Icon, on }) => (
@@ -497,6 +574,9 @@ export default function App() {
             <span className={`text-xs ${status === "error" ? "text-rose-500" : "text-slate-400"}`}>{STATUS_TEXT[status]}</span>
             <button onClick={() => setShowHistory((v) => !v)} title="Riwayat" className={`p-2 md:p-1.5 rounded-md hover:text-slate-600 hover:bg-slate-100 ${showHistory ? "text-slate-700 bg-slate-100" : "text-slate-400"}`}>
               <HistoryIcon size={16} />
+            </button>
+            <button onClick={() => goTab("profile")} title="Profil" className={`hidden md:inline-flex rounded-full ring-2 transition ${tab === "profile" && !viewingMember ? "ring-violet-400" : "ring-transparent hover:ring-slate-200"}`}>
+              <Avatar name={people[meIdx].name} i={meIdx} photo={people[meIdx].photo} size="w-8 h-8 text-xs" />
             </button>
           </div>
         </div>
@@ -519,36 +599,18 @@ export default function App() {
           )}
           {showHistory && <HistoryPanel onRestore={restore} onClose={() => setShowHistory(false)} />}
 
-          {/* ═════════ HALAMAN ANGGOTA ═════════ */}
-          {viewingMember && (
-            <MemberPage
-              index={memberIdx}
-              people={people}
-              expenses={expenses}
-              packing={packing}
-              monthLabels={monthLabels}
-              curIdx={curIdx}
-              monthly={monthly}
-              monthsOf={monthsOf}
-              personTotal={personTotal}
-              fundShare={fundShare}
-              fmt={fmt}
-              rateOf={rateOf}
-              homeEps={homeEps}
-              onSetPaid={setPaidMany}
-              onRename={(v) => upd("people", memberIdx, "name", v)}
-              onOpenMember={openMember}
-              onOpenExpense={openExpense}
-              onBack={closeHash}
-            />
-          )}
+          {/* ═════════ PROFIL ANGGOTA (dari foto) ═════════ */}
+          {viewingMember && <ProfilePage {...profileProps} index={memberIdx} isMe={memberIdx === meIdx} onBack={closeHash} />}
+
+          {/* ═════════ PROFIL SENDIRI ═════════ */}
+          {!viewingMember && tab === "profile" && <ProfilePage {...profileProps} index={meIdx} isMe />}
 
           {/* ═════════ NABUNG ═════════ */}
           {!viewingMember && tab === "save" && (
             <div className="space-y-4">
               <div className="bg-white rounded-xl border border-slate-200 p-4 flex flex-wrap gap-x-6 gap-y-3 items-center">
                 <label className="flex items-center justify-between md:justify-start gap-2 text-sm w-full md:w-auto">
-                  <span className="text-slate-500 font-medium">Mulai nabung</span>
+                  <span className="text-slate-500 font-medium">Mulai menabung</span>
                   <input
                     type="month"
                     value={saveStart}
@@ -557,7 +619,7 @@ export default function App() {
                   />
                 </label>
                 <label className="flex items-center justify-between md:justify-start gap-2 text-sm w-full md:w-auto">
-                  <span className="text-slate-500 font-medium">Berhenti nabung</span>
+                  <span className="text-slate-500 font-medium">Berhenti menabung</span>
                   <input
                     type="month"
                     value={saveEnd}
@@ -574,7 +636,7 @@ export default function App() {
                     <Cell type="number" value={trip.monthly} onChange={(v) => setTrip("monthly", v)} className="w-32" placeholder="Belum ditentukan" />
                   </div>
                 </label>
-                {endBeforeStart && <span className="text-xs text-rose-500 w-full">Bulan berhenti ada sebelum bulan mulai.</span>}
+                {endBeforeStart && <span className="text-xs text-rose-500 w-full">Bulan berhenti berada sebelum bulan mulai.</span>}
               </div>
 
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -583,7 +645,7 @@ export default function App() {
                   label={curLabel ? `Terkumpul ${curLabel}` : "Bulan ini"}
                   value={curLabel ? fmt(monthTotal(curIdx)) : "–"}
                   accent="bg-teal-500"
-                  sub={curLabel ? `${paidThisMonth} dari ${activeIdx.length} udah setor` : curIdx < 0 ? "Belum mulai" : "Periode udah selesai"}
+                  sub={curLabel ? `${paidThisMonth} dari ${activeIdx.length} sudah setor` : curIdx < 0 ? "Belum mulai" : "Periode sudah selesai"}
                 />
                 <Stat label="Target minimal per orang" value={monthly ? fmt(monthly * nMonths) : "Belum diatur"} accent="bg-amber-400" />
                 <Stat label="Sisa bulan" value={monthsLeft} accent="bg-indigo-400" sub={curLabel ? `Bulan ke-${curIdx + 1} dari ${nMonths}` : null} />
@@ -660,7 +722,7 @@ export default function App() {
 
               <div className="flex flex-wrap gap-4 text-xs text-slate-500">
                 <span className="flex items-center gap-1.5">
-                  <span className="w-3 h-3 rounded bg-emerald-100 border border-emerald-200" /> Udah setor
+                  <span className="w-3 h-3 rounded bg-emerald-100 border border-emerald-200" /> Sudah setor
                 </span>
                 {monthly > 0 && (
                   <span className="flex items-center gap-1.5">
@@ -668,24 +730,30 @@ export default function App() {
                   </span>
                 )}
                 <span className="flex items-center gap-1.5">
-                  <span className="w-3 h-3 rounded bg-rose-100 border border-rose-200" /> Bolong
+                  <span className="w-3 h-3 rounded bg-rose-100 border border-rose-200" /> Terlewat
                 </span>
               </div>
               {removedSaved > 0 && (
                 <p className="text-xs text-slate-500">
-                  Termasuk {fmt(removedSaved)} dari yang udah keluar ({removedSavers.map((p) => p.name).join(", ")}).
+                  Termasuk {fmt(removedSaved)} dari anggota yang sudah keluar ({removedSavers.map((p) => p.name).join(", ")}).
                 </p>
               )}
-              {hiddenSavings && <p className="text-xs text-amber-600">Ada setoran setelah {lastLabel} yang disembunyikan. Muncul lagi kalau bulan berhenti dimundurin.</p>}
+              {hiddenSavings && <p className="text-xs text-amber-600">Ada setoran setelah {lastLabel} yang disembunyikan. Akan muncul lagi jika bulan berhenti dimundurkan.</p>}
             </div>
           )}
 
           {/* ═════════ IDE ═════════ */}
-          {!viewingMember && tab === "ideas" && <IdeasTab data={data} setData={setData} />}
+          {!viewingMember && tab === "ideas" && (
+            <>
+              <PlanSwitch />
+              <IdeasTab data={data} setData={setData} />
+            </>
+          )}
 
           {/* ═════════ ITINERARY ═════════ */}
           {!viewingMember && tab === "itinerary" && (
             <>
+              <PlanSwitch />
               <div className="md:hidden">
                 <ItineraryMobile days={days} setDays={setDays} />
               </div>
@@ -698,7 +766,7 @@ export default function App() {
                         <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide">Jam</th>
                         <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide">Tempat</th>
                         <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide">Kegiatan</th>
-                        <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide">Kira-kira harga</th>
+                        <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide">Perkiraan harga</th>
                         <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide bg-amber-500">Catatan</th>
                         <th className="w-10" />
                       </tr>
@@ -814,19 +882,25 @@ export default function App() {
             />
           )}
 
-          {/* ═════════ BAWAAN ═════════ */}
-          {!viewingMember && tab === "packing" && <PackingTab people={people} activeIdx={activeIdx} isActive={isActive} packing={packing} packCats={data.packCats} setData={setData} meIdx={meIdx} setMe={setMe} />}
+          {/* ═════════ BAWAAN (barang bersama) ═════════ */}
+          {!viewingMember && tab === "packing" && <PackingTab mode="shared" people={people} activeIdx={activeIdx} isActive={isActive} packing={packing} packCats={data.packCats} setData={setData} meIdx={meIdx} />}
         </div>
       </div>
 
       {/* Navigasi bawah (HP) */}
       <nav className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur border-t border-slate-200 pb-[env(safe-area-inset-bottom)]">
         <div className="grid grid-cols-5">
-          {tabs.map(({ id, label, Icon, on }) => {
-            const active = tab === id && !viewingMember;
+          {navItems.map(({ id, label, Icon, color }) => {
+            const active = navActive(id);
             return (
-              <button key={id} onClick={() => goTab(id)} className={`flex flex-col items-center gap-1 pt-2.5 pb-2 text-[11px] font-medium transition ${active ? on.split(" ")[0] : "text-slate-400"}`}>
-                <Icon size={22} strokeWidth={active ? 2.4 : 2} />
+              <button key={id} onClick={() => goTab(id === "plan" ? planSub : id)} className={`flex flex-col items-center gap-1 pt-2.5 pb-2 text-[11px] font-medium transition ${active ? color : "text-slate-400"}`}>
+                {id === "profile" ? (
+                  <span className={`rounded-full ring-2 ${active ? "ring-violet-400" : "ring-transparent"}`}>
+                    <Avatar name={people[meIdx].name} i={meIdx} photo={people[meIdx].photo} size="w-[22px] h-[22px] text-[10px]" />
+                  </span>
+                ) : (
+                  <Icon size={22} strokeWidth={active ? 2.4 : 2} />
+                )}
                 {label}
               </button>
             );

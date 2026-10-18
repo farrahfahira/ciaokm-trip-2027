@@ -9,13 +9,14 @@ const uid = () => Math.random().toString(36).slice(2, 9);
 const field = "w-full text-base bg-slate-50 border border-slate-200 rounded-lg px-3 py-2.5 focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-300 placeholder:text-slate-400";
 const lbl = "block text-sm font-medium text-slate-600 mb-1.5";
 
-export default function PackingTab({ people, activeIdx, isActive, packing, packCats, setData, meIdx, setMe }) {
-  const [view, setView] = useState("personal");
+// mode "personal": daftar bawaan sendiri (di Profil). mode "shared": barang bersama (tab Bawaan).
+export default function PackingTab({ mode = "shared", people, activeIdx, isActive, packing, packCats, setData, meIdx }) {
   const [draft, setDraft] = useState(null);
   const [error, setError] = useState("");
   const [newCat, setNewCat] = useState(null);
   const [catEdit, setCatEdit] = useState(null); // { scope, id, name }
 
+  const personal = mode === "personal";
   const meActive = meIdx !== null && isActive(meIdx);
   const cats = packCats || { shared: [], personal: {} };
   const sharedCats = cats.shared || [];
@@ -74,7 +75,7 @@ export default function PackingTab({ people, activeIdx, isActive, packing, packC
   const openNew = () => {
     setError("");
     setNewCat(null);
-    setDraft({ id: uid(), item: "", type: view, who: [], catSel: "", isNew: true });
+    setDraft({ id: uid(), item: "", type: personal ? "personal" : "shared", who: [], catSel: "", isNew: true });
   };
   const openEdit = (x) => {
     setError("");
@@ -100,8 +101,7 @@ export default function PackingTab({ people, activeIdx, isActive, packing, packC
 
   const save = () => {
     const name = draft.item.trim();
-    if (!name) return setError("Isi nama barangnya dulu.");
-    if (draft.type === "personal" && draft.isNew && !meActive) return setError("Pilih nama dulu.");
+    if (!name) return setError("Nama barang belum diisi.");
     const x =
       draft.type === "shared"
         ? { id: draft.id, item: name, type: "shared", who: draft.who, cat: draft.catSel || "", done: {} }
@@ -109,7 +109,7 @@ export default function PackingTab({ people, activeIdx, isActive, packing, packC
     setPacking((ps) => {
       const cur = ps.find((p) => p.id === x.id);
       if (!cur) return [...ps, x];
-      return ps.map((p) => (p.id === x.id ? { ...x, done: cur.done ?? x.done } : p)); // centang tetap aman
+      return ps.map((p) => (p.id === x.id ? { ...x, done: cur.done ?? x.done } : p));
     });
     setDraft(null);
   };
@@ -131,7 +131,7 @@ export default function PackingTab({ people, activeIdx, isActive, packing, packC
     setCatEdit(null);
   };
   const deleteCat = () => {
-    if (!confirm(`Hapus kategori "${catEdit.name}"?\n\nBarangnya pindah ke Belum ada kategori.`)) return;
+    if (!confirm(`Hapus kategori "${catEdit.name}"?\n\nBarangnya akan dipindahkan ke Belum ada kategori.`)) return;
     const { scope, id } = catEdit;
     setData((d) => {
       const pc = d.packCats || { shared: [], personal: {} };
@@ -152,20 +152,6 @@ export default function PackingTab({ people, activeIdx, isActive, packing, packC
   };
 
   // ── tampilan ──
-  const NamePicker = () => (
-    <div className="bg-white rounded-xl border border-slate-200 p-4 flex flex-wrap items-center gap-2 text-sm">
-      <span className="text-slate-500">Pilih nama dulu</span>
-      <select value="" onChange={(e) => e.target.value !== "" && setMe(Number(e.target.value))} className="text-sm rounded-md px-2 py-1.5 bg-slate-100 cursor-pointer focus:outline-none focus:ring-2 focus:ring-sky-300">
-        <option value="">Pilih nama</option>
-        {activeIdx.map((i) => (
-          <option key={i} value={i}>
-            {people[i].name}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-
   const Progress = ({ text, k, n }) => (
     <div className="bg-white rounded-xl border border-slate-200 p-4">
       <div className="flex justify-between text-sm mb-2">
@@ -197,16 +183,16 @@ export default function PackingTab({ people, activeIdx, isActive, packing, packC
       const a = bringers(x);
       const k = a.filter((j) => sharedDone(x, j)).length;
       if (!a.length) {
-        sub = "Belum ada yang bawa";
+        sub = "Belum ada yang membawa";
         warn = true;
-      } else sub = `${names(a)} yang bawa${a.length > 1 ? ` · ${k}/${a.length} udah` : ""}`;
+      } else sub = `${names(a)} yang membawa${a.length > 1 ? ` · ${k}/${a.length} sudah` : ""}`;
     }
     return (
       <div className="flex items-center gap-3 px-3 py-2.5">
         {canTick ? (
           <button
             onClick={() => toggle(x)}
-            aria-label={checked ? "Belum" : "Udah"}
+            aria-label={checked ? "Belum" : "Sudah"}
             className={`w-7 h-7 shrink-0 rounded-lg border-2 flex items-center justify-center transition ${checked ? "bg-sky-500 border-sky-500 text-white" : "border-slate-300"}`}
           >
             {checked && <Check size={16} strokeWidth={3} />}
@@ -234,51 +220,36 @@ export default function PackingTab({ people, activeIdx, isActive, packing, packC
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex gap-2">
-          {[
-            { id: "personal", label: "Pribadi" },
-            { id: "shared", label: "Bersama" },
-          ].map((f) => (
-            <button key={f.id} onClick={() => setView(f.id)} className={`text-sm px-4 py-1.5 rounded-full border transition ${view === f.id ? "bg-sky-500 border-sky-500 text-white" : "bg-white border-slate-200 text-slate-600"}`}>
-              {f.label}
-            </button>
-          ))}
-        </div>
-        <button
-          onClick={openNew}
-          disabled={view === "personal" && !meActive}
-          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium text-white bg-sky-500 hover:bg-sky-600 active:bg-sky-600 disabled:opacity-40"
-        >
+      {personal ? (
+        <Progress text={`${mineDoneCount} dari ${mineAll.length} sudah masuk tas`} k={mineDoneCount} n={mineAll.length} />
+      ) : (
+        <Progress text={`${sharedReady} dari ${sharedItems.length} barang bersama siap`} k={sharedReady} n={sharedItems.length} />
+      )}
+
+      <div className="flex justify-end">
+        <button onClick={openNew} disabled={personal && !meActive} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium text-white bg-sky-500 hover:bg-sky-600 active:bg-sky-600 disabled:opacity-40">
           <Plus size={16} /> Tambah barang
         </button>
       </div>
 
-      {view === "personal" &&
-        (!meActive ? (
-          <NamePicker />
-        ) : (
-          <>
-            <Progress text={`Punya ${people[meIdx].name}: ${mineDoneCount}/${mineAll.length}`} k={mineDoneCount} n={mineAll.length} />
-            {mineAll.length === 0 && <div className="bg-white rounded-xl border border-dashed border-slate-300 text-center text-sm text-slate-400 py-10">Belum ada barang.</div>}
-            {myShared.length > 0 && (
-              <div>
-                <Header title="Barang bersama" />
-                <List items={myShared} />
-              </div>
-            )}
-            {personalGroups.map((g) => (
-              <div key={g.cat ? g.cat.id : "none"}>
-                <Header cat={g.cat} scope="personal" />
-                <List items={g.items} />
-              </div>
-            ))}
-          </>
-        ))}
-
-      {view === "shared" && (
+      {personal ? (
         <>
-          <Progress text={`${sharedReady} dari ${sharedItems.length} barang bersama siap`} k={sharedReady} n={sharedItems.length} />
+          {mineAll.length === 0 && <div className="bg-white rounded-xl border border-dashed border-slate-300 text-center text-sm text-slate-400 py-10">Belum ada barang.</div>}
+          {myShared.length > 0 && (
+            <div>
+              <Header title="Barang bersama" />
+              <List items={myShared} />
+            </div>
+          )}
+          {personalGroups.map((g) => (
+            <div key={g.cat ? g.cat.id : "none"}>
+              <Header cat={g.cat} scope="personal" />
+              <List items={g.items} />
+            </div>
+          ))}
+        </>
+      ) : (
+        <>
           {sharedItems.length === 0 && <div className="bg-white rounded-xl border border-dashed border-slate-300 text-center text-sm text-slate-400 py-10">Belum ada barang bersama.</div>}
           {sharedGroups.map((g) => (
             <div key={g.cat ? g.cat.id : "none"}>
@@ -316,43 +287,9 @@ export default function PackingTab({ people, activeIdx, isActive, packing, packC
               <input autoFocus={draft.isNew} value={draft.item} onChange={(e) => setD("item", e.target.value)} placeholder="Nama barang" className={field} />
             </div>
 
-            {draft.isNew && (
-              <div>
-                <label className={lbl}>Buat</label>
-                <div className="grid grid-cols-2 gap-2">
-                  {[
-                    { t: "personal", title: "Pribadi", hint: "Punya sendiri" },
-                    { t: "shared", title: "Bersama", hint: "Satu buat semua" },
-                  ].map((o) => (
-                    <button
-                      key={o.t}
-                      onClick={() => setDraft((d) => ({ ...d, type: o.t, catSel: "" }))}
-                      className={`text-left rounded-xl border-2 px-3 py-2.5 transition ${draft.type === o.t ? "border-sky-500 bg-sky-50" : "border-slate-200"}`}
-                    >
-                      <div className={`text-sm font-semibold ${draft.type === o.t ? "text-sky-700" : "text-slate-700"}`}>{o.title}</div>
-                      <div className="text-xs text-slate-400">{o.hint}</div>
-                    </button>
-                  ))}
-                </div>
-                {draft.type === "personal" && !meActive && (
-                  <div className="flex flex-wrap items-center gap-2 mt-2 text-sm">
-                    <span className="text-rose-500">Pilih nama dulu</span>
-                    <select value="" onChange={(e) => e.target.value !== "" && setMe(Number(e.target.value))} className="text-sm rounded-md px-2 py-1.5 bg-slate-100 cursor-pointer focus:outline-none">
-                      <option value="">Pilih nama</option>
-                      {activeIdx.map((i) => (
-                        <option key={i} value={i}>
-                          {people[i].name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-              </div>
-            )}
-
             {draft.type === "shared" && (
               <div>
-                <label className={lbl}>Siapa yang bawa?</label>
+                <label className={lbl}>Siapa yang membawa?</label>
                 <div className="flex flex-wrap gap-2">
                   {people
                     .map((_, j) => j)
