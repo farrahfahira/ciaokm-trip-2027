@@ -1,6 +1,7 @@
 // Shared helpers for the Ideas board and idea pages
 
-export const AVATAR = ["bg-rose-400", "bg-orange-400", "bg-amber-400", "bg-emerald-500", "bg-teal-500", "bg-sky-500", "bg-indigo-500", "bg-violet-500"];
+export { AVATAR, Avatar } from "./shared";
+
 export const IDEA_CATS = ["Food", "Sights", "Shopping", "Stay", "Activity", "Info"];
 export const IDEA_TINT = {
   Food: "bg-amber-50 text-amber-700",
@@ -31,10 +32,6 @@ export const coverOf = (x) => {
 export const firstLinkOf = (x) => (x.links || [])[0]?.url || "";
 export const titleOf = (x) => x.text || domainOf(firstLinkOf(x)) || "Untitled idea";
 
-export const Avatar = ({ name, i, size = "w-6 h-6 text-xs" }) => (
-  <span className={`inline-flex ${size} shrink-0 rounded-full ${AVATAR[i % 8]} text-white font-semibold items-center justify-center`}>{(name || "?").trim().charAt(0).toUpperCase() || "?"}</span>
-);
-
 const loadImage = (file) =>
   new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
@@ -50,7 +47,7 @@ const loadImage = (file) =>
     img.src = url;
   });
 
-// Shrink a photo on the device before uploading (max 1600px, JPEG)
+// Shrink a photo on the device before uploading (JPEG, longest side = max)
 export async function shrinkImage(file, max = 1600, quality = 0.82) {
   const img = await loadImage(file);
   const scale = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
@@ -67,8 +64,8 @@ export async function shrinkImage(file, max = 1600, quality = 0.82) {
   return { blob, w, h };
 }
 
-export async function uploadPhoto(file) {
-  const { blob, w, h } = await shrinkImage(file);
+export async function uploadPhoto(file, max = 1600) {
+  const { blob, w, h } = await shrinkImage(file, max);
   const res = await fetch("/api/photos", { method: "POST", headers: { "Content-Type": "image/jpeg" }, body: blob });
   const body = await res.json().catch(() => ({}));
   if (!res.ok || !body.url) throw new Error(body.error || `Couldn't upload ${file.name}.`);

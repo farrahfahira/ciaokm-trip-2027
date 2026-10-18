@@ -1,11 +1,12 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Plus, Trash2, RotateCcw, MapPin, Calendar, PiggyBank, CalendarDays, Wallet, Luggage, Check, ExternalLink, Link2, ArrowRight, Lightbulb, History as HistoryIcon } from "lucide-react";
+import { Plus, Trash2, RotateCcw, MapPin, Calendar, PiggyBank, CalendarDays, Wallet, Luggage, Check, ExternalLink, Link2, ArrowRight, Lightbulb, Users, History as HistoryIcon } from "lucide-react";
 import { useSharedTrip } from "./useSharedTrip";
 import IdeasTab from "./IdeasTab";
 import HistoryPanel from "./HistoryPanel";
 import MemberPage from "./MemberPage";
+import ManagePanel from "./ManagePanel";
 import { CATS, CAT_TINT, NO_DECIMALS, FUND, num, isFund, normCat, settle, Avatar } from "./shared";
 
 const DAY_TINT = ["bg-indigo-100 text-indigo-700", "bg-emerald-100 text-emerald-700", "bg-amber-100 text-amber-700", "bg-rose-100 text-rose-700", "bg-sky-100 text-sky-700", "bg-violet-100 text-violet-700"];
@@ -42,7 +43,7 @@ const fmtDate = (ms) => (ms ? new Date(ms).toLocaleDateString("en-GB", { day: "n
 const blankRow = () => ({ id: uid(), time: "", place: "", link: "", activity: "", price: "", notes: "" });
 
 const defaults = () => {
-  const people = Array.from({ length: 8 }, (_, i) => ({ name: `Person ${i + 1}`, months: blankMonths() }));
+  const people = Array.from({ length: 8 }, (_, i) => ({ id: `p-${i}`, name: `Person ${i + 1}`, months: blankMonths(), photo: "" }));
   return {
     trip: { name: "Group Trip", dest: "", start: "", end: "", saveStart: thisMonth(), saveEnd: addMonths(thisMonth(), DEFAULT_MONTHS - 1), monthly: "", settleMode: "separate" },
     currencies: [
@@ -78,8 +79,11 @@ const migrate = (s) => {
   const out = { ...d, ...s };
   out.trip = { ...d.trip, ...t, saveEnd: t.saveEnd || addMonths(t.saveStart || d.trip.saveStart, DEFAULT_MONTHS - 1) };
   out.currencies = (Array.isArray(s.currencies) && s.currencies.length ? s.currencies : d.currencies).map((c, i) => ({ ...c, id: c.id || `cur-${i}` }));
-  out.people = (s.people || d.people).map((p) => ({
-    name: p.name,
+  // Keep every field on a person (photo, removed, …), only fill in what's missing
+  out.people = (s.people || d.people).map((p, i) => ({
+    ...p,
+    id: p.id || `p-${i}`,
+    name: p.name ?? `Person ${i + 1}`,
     months: Array.isArray(p.months) ? p.months : [num(p.saved) || ""],
   }));
   if (!Array.isArray(s.days)) {
@@ -175,6 +179,7 @@ export default function App() {
   const [tab, setTab] = useState("itinerary");
   const [linkEdit, setLinkEdit] = useState(null);
   const [showHistory, setShowHistory] = useState(false);
+  const [showManage, setShowManage] = useState(false);
   const [memberIdx, setMemberIdx] = useState(null);
   const memberOpenedHere = useRef(false);
 
@@ -212,6 +217,12 @@ export default function App() {
   const home = currencies[0];
   const viewingMember = memberIdx !== null && memberIdx < people.length;
 
+  // Removed travelers stay in the data (so money still adds up) but are hidden from lists
+  const activeIdx = people.map((_, i) => i).filter((i) => !people[i].removed);
+  const activeCount = Math.max(1, activeIdx.length);
+  const isActive = (i) => !!people[i] && !people[i].removed;
+  const activeNames = activeIdx.map((i) => people[i].name);
+
   // ── generic updaters ──
   const setTrip = (f, v) => setData((d) => ({ ...d, trip: { ...d.trip, [f]: v } }));
   const upd = (k, i, f, v) => setData((d) => ({ ...d, [k]: d[k].map((r, j) => (j === i ? { ...r, [f]: v } : r)) }));
@@ -221,6 +232,22 @@ export default function App() {
     if (confirm("Reset everything to the starter template? This clears it for ALL friends.\n\nA backup is saved first, so you can undo this from History.")) setData(defaults(), { reason: "reset" });
   };
   const restore = (snapshot) => setData(migrate(snapshot), { reason: "restore" });
+
+  // ── travelers ──
+  const addPerson = (name) => setData((d) => ({ ...d, people: [...d.people, { id: uid(), name, months: [], photo: "" }] }));
+  const removePerson = (i) => {
+    if (activeIdx.length <= 1) {
+      alert("A trip needs at least one traveler.");
+      return;
+    }
+    if (
+      !confirm(`Remove ${people[i].name} from the trip?\n\nTheir savings, expenses and payments stay in the records, so the money still adds up. They just won't show up in new expenses or lists. You can restore them anytime from Manage.`)
+    )
+      return;
+    upd("people", i, "removed", true);
+  };
+  const restorePerson = (i) => upd("people", i, "removed", false);
+  const setPhoto = (i, url) => upd("people", i, "photo", url);
 
   // ── savings ──
   const updMonth = (i, m, v) =>
@@ -275,7 +302,16 @@ export default function App() {
       ...d,
       expenses: d.expenses.map((e, j) => (j !== ei ? e : { ...e, split: e.split.includes(pi) ? e.split.filter((x) => x !== pi) : [...e.split, pi].sort((a, b) => a - b) })),
     }));
-  const setSplitAll = (ei, all) => upd("expenses", ei, "split", all ? people.map((_, i) => i) : []);
+  // "all" = every active traveler; removed travelers already in the split stay in it
+  const setSplitAll = (ei, all) =>
+    setData((d) => ({
+      ...d,
+      expenses: d.expenses.map((e, j) => {
+        if (j !== ei) return e;
+        const keepRemoved = e.split.filter((x) => !isActive(x));
+        return { ...e, split: all ? [...new Set([...keepRemoved, ...activeIdx])].sort((a, b) => a - b) : keepRemoved };
+      }),
+    }));
 
   // ── payments (paying each other back) ──
   const settleMode = trip.settleMode || "separate";
@@ -342,9 +378,11 @@ export default function App() {
   const personTotal = (p) => monthsOf(p).reduce((s, v) => s + num(v), 0);
   const monthTotal = (k) => people.reduce((s, p) => s + num(p.months[k]), 0);
   const totalSaved = people.reduce((s, p) => s + personTotal(p), 0);
-  const groupTarget = monthly * nMonths * people.length;
+  const removedSavers = people.filter((p) => p.removed && personTotal(p) > 0);
+  const removedSaved = removedSavers.reduce((s, p) => s + personTotal(p), 0);
+  const groupTarget = monthly * nMonths * activeIdx.length;
   const curLabel = curIdx >= 0 && curIdx < nMonths ? `${monthLabels[curIdx].short} ${monthLabels[curIdx].year}` : null;
-  const paidThisMonth = curLabel ? people.filter((p) => num(p.months[curIdx]) > 0).length : 0;
+  const paidThisMonth = curLabel ? activeIdx.filter((i) => num(people[i].months[curIdx]) > 0).length : 0;
   const monthsLeft = Math.max(0, Math.min(nMonths, nMonths - curIdx));
   const hiddenSavings = people.some((p) => p.months.slice(nMonths).some((v) => num(v) > 0));
   const cellTint = (v, k) => {
@@ -383,6 +421,8 @@ export default function App() {
   });
   const fundUnassigned = fundExpenses.filter((e) => !e.split.some((i) => i < people.length)).length;
   const homeEps = decOf(home.code) === 0 ? 0.5 : 0.005;
+  // Fund table: everyone active, plus removed travelers who still have money in it
+  const fundRows = people.map((_, i) => i).filter((i) => isActive(i) || Math.abs(personTotal(people[i]) - fundShare[i]) >= homeEps);
 
   const packed = packing.filter((p) => p.done).length;
 
@@ -421,15 +461,26 @@ export default function App() {
                 <Cell type="date" value={trip.end} onChange={(v) => setTrip("end", v)} className="w-36" />
               </label>
             </div>
-            <div className="flex items-center mt-4">
+            <div className="flex flex-wrap items-center gap-y-2 mt-4">
               <div className="flex -space-x-1.5">
-                {people.map((p, i) => (
-                  <button key={i} onClick={() => openMember(i)} title={`Open ${p.name}'s page`} className={`rounded-full ring-2 hover:z-10 hover:scale-110 transition ${memberIdx === i ? "ring-indigo-400 z-10" : "ring-white"}`}>
-                    <Avatar name={p.name} i={i} />
+                {activeIdx.map((i) => (
+                  <button
+                    key={people[i].id || i}
+                    onClick={() => openMember(i)}
+                    title={`Open ${people[i].name}'s page`}
+                    className={`rounded-full ring-2 hover:z-10 hover:scale-110 transition ${memberIdx === i ? "ring-indigo-400 z-10" : "ring-white"}`}
+                  >
+                    <Avatar name={people[i].name} i={i} photo={people[i].photo} />
                   </button>
                 ))}
               </div>
-              <span className="text-sm text-slate-500 ml-3">{people.length} travelers · tap a face to see their page</span>
+              <span className="text-sm text-slate-500 ml-3">{activeIdx.length} travelers</span>
+              <button
+                onClick={() => setShowManage((v) => !v)}
+                className={`ml-3 inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg transition ${showManage ? "bg-indigo-100 text-indigo-700" : "text-indigo-600 hover:bg-indigo-50"}`}
+              >
+                <Users size={14} /> Manage
+              </button>
             </div>
           </div>
         </div>
@@ -462,6 +513,21 @@ export default function App() {
         </div>
 
         <div className="mt-5">
+          {showManage && (
+            <ManagePanel
+              people={people}
+              onRename={(i, v) => upd("people", i, "name", v)}
+              onSetPhoto={setPhoto}
+              onRemove={removePerson}
+              onRestore={restorePerson}
+              onAdd={addPerson}
+              onOpenMember={(i) => {
+                setShowManage(false);
+                openMember(i);
+              }}
+              onClose={() => setShowManage(false)}
+            />
+          )}
           {showHistory && <HistoryPanel onRestore={restore} onClose={() => setShowHistory(false)} />}
 
           {/* ═════════ MEMBER PAGE ═════════ */}
@@ -528,12 +594,12 @@ export default function App() {
               </div>
 
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <Stat label="Total saved" value={fmt(totalSaved)} accent="bg-emerald-500" sub={`${fmt(totalSaved / people.length)} avg per person`} />
+                <Stat label="Total saved" value={fmt(totalSaved)} accent="bg-emerald-500" sub={`${fmt(totalSaved / activeCount)} avg per person`} />
                 <Stat
                   label={curLabel ? `${curLabel} collected` : "This month"}
                   value={curLabel ? fmt(monthTotal(curIdx)) : "—"}
                   accent="bg-teal-500"
-                  sub={curLabel ? `${paidThisMonth} of ${people.length} have paid` : curIdx < 0 ? "Saving hasn't started" : "Saving period ended"}
+                  sub={curLabel ? `${paidThisMonth} of ${activeIdx.length} have paid` : curIdx < 0 ? "Saving hasn't started" : "Saving period ended"}
                 />
                 <Stat label="Group minimum" value={monthly ? fmt(groupTarget) : "Not set"} accent="bg-amber-400" sub={monthly ? `${fmt(monthly * nMonths)} per person` : "Set a monthly minimum above"} />
                 <Stat label="Months left" value={monthsLeft} accent="bg-indigo-400" sub={curLabel ? `Currently month ${curIdx + 1} of ${nMonths}` : null} />
@@ -564,26 +630,29 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {people.map((p, i) => (
-                      <tr key={i}>
-                        <td className="px-3 py-1 sticky left-0 bg-white z-10 border-r border-slate-100">
-                          <div className="flex items-center gap-2">
-                            <button onClick={() => openMember(i)} title={`Open ${p.name}'s page`} className="rounded-full hover:scale-110 transition">
-                              <Avatar name={p.name} i={i} />
-                            </button>
-                            <Cell value={p.name} onChange={(v) => upd("people", i, "name", v)} className="font-medium w-28" />
-                          </div>
-                        </td>
-                        {monthsOf(p).map((v, k) => (
-                          <td key={k} className={`p-0.5 ${k === curIdx ? "bg-emerald-50/50" : ""}`}>
-                            <div className={`rounded-md ${cellTint(v, k)}`}>
-                              <Cell type="number" value={v} onChange={(nv) => updMonth(i, k, nv)} className="w-20 text-center hover:bg-transparent" placeholder="–" />
+                    {activeIdx.map((i) => {
+                      const p = people[i];
+                      return (
+                        <tr key={p.id || i}>
+                          <td className="px-3 py-1 sticky left-0 bg-white z-10 border-r border-slate-100">
+                            <div className="flex items-center gap-2">
+                              <button onClick={() => openMember(i)} title={`Open ${p.name}'s page`} className="rounded-full hover:scale-110 transition">
+                                <Avatar name={p.name} i={i} photo={p.photo} />
+                              </button>
+                              <Cell value={p.name} onChange={(v) => upd("people", i, "name", v)} className="font-medium w-28" />
                             </div>
                           </td>
-                        ))}
-                        <td className="px-3 text-sm text-right font-semibold bg-slate-50">{fmt(personTotal(p))}</td>
-                      </tr>
-                    ))}
+                          {monthsOf(p).map((v, k) => (
+                            <td key={k} className={`p-0.5 ${k === curIdx ? "bg-emerald-50/50" : ""}`}>
+                              <div className={`rounded-md ${cellTint(v, k)}`}>
+                                <Cell type="number" value={v} onChange={(nv) => updMonth(i, k, nv)} className="w-20 text-center hover:bg-transparent" placeholder="–" />
+                              </div>
+                            </td>
+                          ))}
+                          <td className="px-3 text-sm text-right font-semibold bg-slate-50">{fmt(personTotal(p))}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                   <tfoot className="border-t-2 border-slate-200 bg-slate-50">
                     <tr>
@@ -615,6 +684,11 @@ export default function App() {
                   <span className="w-3 h-3 rounded bg-emerald-200" /> Current month
                 </span>
               </div>
+              {removedSaved > 0 && (
+                <p className="text-xs text-slate-500">
+                  Totals include {fmt(removedSaved)} saved by removed travelers ({removedSavers.map((p) => p.name).join(", ")}).
+                </p>
+              )}
               {hiddenSavings && <p className="text-xs text-amber-600">Some amounts were entered for months after {lastLabel}. They're hidden and not counted, but they come back if you move the stop month later.</p>}
             </div>
           )}
@@ -765,7 +839,7 @@ export default function App() {
 
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 <Stat label={`Total spent (in ${home.code})`} value={fmt(totalHome)} accent="bg-amber-400" sub={perCur.map((x) => fmt(x.total, x.code)).join(" + ") || "No expenses yet"} />
-                <Stat label="Per person (avg)" value={fmt(totalHome / people.length)} accent="bg-orange-400" />
+                <Stat label="Per person (avg)" value={fmt(totalHome / activeCount)} accent="bg-orange-400" />
                 <Stat label="Still to pay back" value={allSettled ? "Nothing" : fmt(stillToPay)} accent="bg-rose-400" sub={`${payments.length} payment${payments.length === 1 ? "" : "s"} made`} />
                 <Stat label="Savings vs cost" value={fmt(totalSaved - totalHome)} accent={totalSaved >= totalHome ? "bg-emerald-500" : "bg-rose-400"} sub={totalSaved >= totalHome ? "Savings cover the trip" : "Short of trip cost"} />
               </div>
@@ -788,6 +862,9 @@ export default function App() {
                       const cat = normCat(e.cat);
                       const n = e.split.filter((x) => x < people.length).length;
                       const fund = isFund(e);
+                      const allIn = activeIdx.length > 0 && activeIdx.every((j) => e.split.includes(j));
+                      // Show active travelers, plus removed ones who are still part of this expense
+                      const shown = people.map((_, j) => j).filter((j) => isActive(j) || e.split.includes(j));
                       return (
                         <tr key={e.id} title={e.settled ? "Settled earlier" : undefined} className={`hover:bg-slate-50/60 ${!fund && e.settled ? "opacity-50" : ""}`}>
                           <td className="px-3 py-1.5">
@@ -815,22 +892,26 @@ export default function App() {
                           <td className="px-2">
                             <Select value={e.paidBy} onChange={(v) => upd("expenses", i, "paidBy", Number(v))} className={fund ? "bg-emerald-100 text-emerald-700 font-medium" : "bg-slate-100"}>
                               <option value={FUND}>Group fund</option>
-                              {people.map((p, j) => (
-                                <option key={j} value={j}>
-                                  {p.name}
-                                </option>
-                              ))}
+                              {people.map(
+                                (p, j) =>
+                                  (isActive(j) || e.paidBy === j) && (
+                                    <option key={j} value={j}>
+                                      {p.name}
+                                      {p.removed ? " (removed)" : ""}
+                                    </option>
+                                  ),
+                              )}
                             </Select>
                           </td>
                           <td className="px-2">
                             <div className="flex items-center gap-1">
-                              {people.map((p, j) => (
-                                <button key={j} title={p.name} onClick={() => toggleSplit(i, j)}>
-                                  <Avatar name={p.name} i={j} size="w-6 h-6 text-xs" className={e.split.includes(j) ? "" : "opacity-20 grayscale"} />
+                              {shown.map((j) => (
+                                <button key={j} title={people[j].name + (people[j].removed ? " (removed)" : "")} onClick={() => toggleSplit(i, j)}>
+                                  <Avatar name={people[j].name} i={j} photo={people[j].photo} size="w-6 h-6 text-xs" className={e.split.includes(j) ? (people[j].removed ? "ring-2 ring-slate-300" : "") : "opacity-20 grayscale"} />
                                 </button>
                               ))}
-                              <button onClick={() => setSplitAll(i, n !== people.length)} className="text-xs text-slate-400 hover:text-slate-600 ml-1 w-10">
-                                {n === people.length ? "none" : "all"}
+                              <button onClick={() => setSplitAll(i, !allIn)} className="text-xs text-slate-400 hover:text-slate-600 ml-1 w-10">
+                                {allIn ? "none" : "all"}
                               </button>
                               <span className="text-xs text-slate-500 whitespace-nowrap">{n ? `${fmt(num(e.amount) / n, e.cur)} each` : "no one"}</span>
                             </div>
@@ -846,7 +927,7 @@ export default function App() {
               </div>
               <Btn
                 color="bg-amber-500 hover:bg-amber-600"
-                onClick={() => add("expenses", { id: uid(), cat: "Food", item: "", amount: "", cur: currencies[currencies.length > 1 ? 1 : 0].code, paidBy: 0, split: people.map((_, j) => j), settled: false })}
+                onClick={() => add("expenses", { id: uid(), cat: "Food", item: "", amount: "", cur: currencies[currencies.length > 1 ? 1 : 0].code, paidBy: activeIdx[0] ?? 0, split: [...activeIdx], settled: false })}
               >
                 <Plus size={16} /> Add expense
               </Btn>
@@ -898,14 +979,17 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {people.map((p, i) => {
+                      {fundRows.map((i) => {
+                        const p = people[i];
                         const saved = personTotal(p);
                         const bal = saved - fundShare[i];
                         return (
-                          <tr key={i}>
+                          <tr key={p.id || i}>
                             <td className="py-2">
                               <button onClick={() => openMember(i)} className="flex items-center gap-2 hover:text-indigo-600">
-                                <Avatar name={p.name} i={i} size="w-6 h-6 text-xs" /> <span className="font-medium">{p.name}</span>
+                                <Avatar name={p.name} i={i} photo={p.photo} size="w-6 h-6 text-xs" className={p.removed ? "grayscale opacity-60" : ""} />
+                                <span className="font-medium">{p.name}</span>
+                                {p.removed && <span className="text-[11px] text-slate-400">(removed)</span>}
                               </button>
                             </td>
                             <td className="px-3 text-right">{fmt(saved)}</td>
@@ -959,12 +1043,12 @@ export default function App() {
                             {g.tr.map((t, k) => (
                               <div key={k} className="flex flex-wrap items-center gap-2 px-3 py-2.5 text-sm">
                                 <button onClick={() => openMember(t.from)} className="flex items-center gap-2 hover:text-indigo-600">
-                                  <Avatar name={people[t.from].name} i={t.from} size="w-6 h-6 text-xs" />
+                                  <Avatar name={people[t.from].name} i={t.from} photo={people[t.from].photo} size="w-6 h-6 text-xs" />
                                   <span className="font-medium">{people[t.from].name}</span>
                                 </button>
                                 <ArrowRight size={14} className="text-slate-400" />
                                 <button onClick={() => openMember(t.to)} className="flex items-center gap-2 hover:text-indigo-600">
-                                  <Avatar name={people[t.to].name} i={t.to} size="w-6 h-6 text-xs" />
+                                  <Avatar name={people[t.to].name} i={t.to} photo={people[t.to].photo} size="w-6 h-6 text-xs" />
                                   <span className="font-medium">{people[t.to].name}</span>
                                 </button>
                                 <span className="ml-auto font-semibold text-rose-600">{fmt(t.amt, g.fmtCode)}</span>
@@ -1042,11 +1126,12 @@ export default function App() {
                         <td className="px-3">
                           <Select value={r.who} onChange={(v) => upd("packing", i, "who", v)} className="bg-slate-100">
                             <option value="Everyone">Everyone</option>
-                            {people.map((p, j) => (
-                              <option key={j} value={p.name}>
-                                {p.name}
+                            {activeNames.map((name, j) => (
+                              <option key={j} value={name}>
+                                {name}
                               </option>
                             ))}
+                            {r.who !== "Everyone" && !activeNames.includes(r.who) && <option value={r.who}>{r.who}</option>}
                           </Select>
                         </td>
                         <td className="px-2">

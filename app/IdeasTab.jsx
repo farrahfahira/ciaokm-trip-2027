@@ -244,11 +244,13 @@ export default function IdeasTab({ data, setData }) {
             className={`text-sm rounded-md px-2 py-1.5 bg-slate-100 cursor-pointer focus:outline-none focus:ring-2 focus:ring-violet-300 ${needMe ? "ring-2 ring-rose-300" : ""}`}
           >
             <option value="">Pick your name</option>
-            {people.map((p, i) => (
-              <option key={i} value={i}>
-                {p.name}
-              </option>
-            ))}
+            {people.map((p, i) =>
+              p.removed ? null : (
+                <option key={i} value={i}>
+                  {p.name}
+                </option>
+              ),
+            )}
           </select>
           {needMe ? <span className="text-xs text-rose-500">Pick your name first so everyone knows who's interested.</span> : <span className="text-xs text-slate-400">Remembered on this device only</span>}
         </div>

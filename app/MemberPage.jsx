@@ -95,7 +95,7 @@ export default function MemberPage({
           <ArrowLeft size={15} /> Back
         </button>
         <div className="flex items-center gap-3">
-          <Avatar name={p.name} i={index} size="w-12 h-12 text-lg" />
+          <Avatar name={p.name} i={index} photo={p.photo} size="w-12 h-12 text-lg" className={p.removed ? "grayscale opacity-60" : ""} />
           <input
             value={p.name}
             onChange={(e) => onRename(e.target.value)}

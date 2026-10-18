@@ -1,4 +1,4 @@
-// Shared helpers used by page.jsx and MemberPage.jsx
+// Shared helpers used across the app
 
 export const AVATAR = ["bg-rose-400", "bg-orange-400", "bg-amber-400", "bg-emerald-500", "bg-teal-500", "bg-sky-500", "bg-indigo-500", "bg-violet-500"];
 export const CATS = ["Stay", "Transport", "Food", "Activities", "Shopping", "Other"];
@@ -46,6 +46,10 @@ export const settle = (bal, dec) => {
   return out;
 };
 
-export const Avatar = ({ name, i, size = "w-7 h-7 text-xs", className = "" }) => (
-  <span className={`inline-flex ${size} shrink-0 rounded-full ${AVATAR[i % 8]} text-white font-semibold items-center justify-center ${className}`}>{(name || "?").trim().charAt(0).toUpperCase() || "?"}</span>
-);
+// Profile photo if there is one, otherwise a coloured circle with their initial
+export const Avatar = ({ name, i, photo, size = "w-7 h-7 text-xs", className = "" }) =>
+  photo ? (
+    <img src={photo} alt={name || ""} className={`inline-block ${size} shrink-0 rounded-full object-cover bg-slate-100 ${className}`} />
+  ) : (
+    <span className={`inline-flex ${size} shrink-0 rounded-full ${AVATAR[i % 8]} text-white font-semibold items-center justify-center ${className}`}>{(name || "?").trim().charAt(0).toUpperCase() || "?"}</span>
+  );
