@@ -70,6 +70,7 @@ export default function IdeasTab({ data, setData }) {
   };
 
   // If a friend deleted the city you're filtering by, fall back to All
+
   const activeCity = cityFilter === "all" || cityFilter === "" || cities.some((c) => c.id === cityFilter) ? cityFilter : "all";
   const selectedCity = cities.find((c) => c.id === activeCity);
   const cityOf = (x) => (cities.some((c) => c.id === x.city) ? x.city : "");
@@ -218,11 +219,9 @@ export default function IdeasTab({ data, setData }) {
         </Chip>
         {cities.map((c) => (
           <Chip key={c.id} active={activeCity === c.id} onClick={() => setCityFilter(c.id)}>
-            <MapPin size={13} /> {c.name || "Unnamed"}
-            <span className="opacity-70">{inCity(c.id).length}</span>
-            <span className="inline-flex items-center gap-0.5 opacity-70">
-              <Heart size={12} />
-              {cityHearts(c.id)}
+            {c.name || "Unnamed"}
+            <span className="inline-flex items-center gap-1 opacity-70">
+              <Heart size={13} /> {cityHearts(c.id)}
             </span>
           </Chip>
         ))}

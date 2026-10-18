@@ -20,11 +20,13 @@ const CAT_TINT = {
 const NO_DECIMALS = ["IDR", "JPY", "KRW", "VND"];
 const DEFAULT_MONTHS = 12;
 const MAX_MONTHS = 60;
+const FUND = -1; // "Paid by" value for expenses paid from the group fund
 
 const uid = () => Math.random().toString(36).slice(2, 9);
 const num = (v) => Number(v) || 0;
 const blankMonths = () => Array(DEFAULT_MONTHS).fill("");
 const isUrl = (s) => /^https?:\/\//i.test(String(s || "").trim());
+const isFund = (e) => e.paidBy === FUND;
 const thisMonth = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
@@ -280,14 +282,15 @@ export default function App() {
       expenses: d.expenses.map((e, j) => (j !== ei ? e : { ...e, split: e.split.includes(pi) ? e.split.filter((x) => x !== pi) : [...e.split, pi].sort((a, b) => a - b) })),
     }));
   const setSplitAll = (ei, all) => upd("expenses", ei, "split", all ? people.map((_, i) => i) : []);
-  const settleGroup = (code) => setData((d) => ({ ...d, expenses: d.expenses.map((e) => (!e.settled && (code === "__ALL__" || e.cur === code) ? { ...e, settled: true } : e)) }));
+  const settleGroup = (code) => setData((d) => ({ ...d, expenses: d.expenses.map((e) => (!isFund(e) && !e.settled && (code === "__ALL__" || e.cur === code) ? { ...e, settled: true } : e)) }));
 
+  // Person-to-person balances. Fund-paid expenses are left out: nobody owes anybody for those.
   const balances = (code) => {
     const b = people.map(() => 0);
     expenses.forEach((e) => {
       const amt = num(e.amount);
       const split = e.split.filter((i) => i < people.length);
-      if (e.settled || !amt || !split.length) return;
+      if (isFund(e) || e.settled || !amt || !split.length || e.paidBy >= people.length) return;
       let a = amt;
       if (code === "__ALL__") a = amt * rateOf(e.cur);
       else if (e.cur !== code) return;
@@ -339,12 +342,26 @@ export default function App() {
 
   const totalHome = expenses.reduce((s, e) => s + num(e.amount) * rateOf(e.cur), 0);
   const perCur = currencies.map((c) => ({ code: c.code, total: expenses.filter((e) => e.cur === c.code).reduce((s, e) => s + num(e.amount), 0) })).filter((x) => x.total);
-  const unsettled = expenses.filter((e) => !e.settled && num(e.amount) > 0);
+  const unsettled = expenses.filter((e) => !isFund(e) && !e.settled && num(e.amount) > 0);
   const missingRate = currencies.slice(1).some((c) => !num(c.rate));
   const settleGroups =
     settleMode === "combined"
       ? [{ code: "__ALL__", label: `All currencies → ${home.code}`, fmtCode: home.code }]
       : currencies.filter((c) => unsettled.some((e) => e.cur === c.code)).map((c) => ({ code: c.code, label: c.code, fmtCode: c.code }));
+
+  // ── group fund (all in home currency, same as the Save tab) ──
+  const fundExpenses = expenses.filter((e) => isFund(e) && num(e.amount) > 0);
+  const fundSpent = fundExpenses.reduce((s, e) => s + num(e.amount) * rateOf(e.cur), 0);
+  const fundLeft = totalSaved - fundSpent;
+  const fundShare = people.map(() => 0);
+  fundExpenses.forEach((e) => {
+    const split = e.split.filter((i) => i < people.length);
+    if (!split.length) return;
+    const each = (num(e.amount) * rateOf(e.cur)) / split.length;
+    split.forEach((i) => (fundShare[i] += each));
+  });
+  const fundUnassigned = fundExpenses.filter((e) => !e.split.some((i) => i < people.length)).length;
+  const homeEps = decOf(home.code) === 0 ? 0.5 : 0.005;
 
   const packed = packing.filter((p) => p.done).length;
 
@@ -697,7 +714,7 @@ export default function App() {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 <Stat label={`Total spent (in ${home.code})`} value={fmt(totalHome)} accent="bg-amber-400" sub={perCur.map((x) => fmt(x.total, x.code)).join(" + ") || "No expenses yet"} />
                 <Stat label="Per person (avg)" value={fmt(totalHome / people.length)} accent="bg-orange-400" />
-                <Stat label="Unsettled expenses" value={unsettled.length} accent="bg-rose-400" sub={`${expenses.length - unsettled.length} settled / empty`} />
+                <Stat label="Unsettled (paid personally)" value={unsettled.length} accent="bg-rose-400" sub={`${fundExpenses.length} paid from the group fund`} />
                 <Stat label="Savings vs cost" value={fmt(totalSaved - totalHome)} accent={totalSaved >= totalHome ? "bg-emerald-500" : "bg-rose-400"} sub={totalSaved >= totalHome ? "Savings cover the trip" : "Short of trip cost"} />
               </div>
 
@@ -719,8 +736,9 @@ export default function App() {
                     {expenses.map((e, i) => {
                       const cat = normCat(e.cat);
                       const n = e.split.filter((x) => x < people.length).length;
+                      const fund = isFund(e);
                       return (
-                        <tr key={e.id} className={`hover:bg-slate-50/60 ${e.settled ? "opacity-50" : ""}`}>
+                        <tr key={e.id} className={`hover:bg-slate-50/60 ${!fund && e.settled ? "opacity-50" : ""}`}>
                           <td className="px-3 py-1.5">
                             <Select value={cat} onChange={(v) => upd("expenses", i, "cat", v)} className={`font-medium ${CAT_TINT[cat]}`}>
                               {CATS.map((c) => (
@@ -744,7 +762,8 @@ export default function App() {
                             </div>
                           </td>
                           <td className="px-2">
-                            <Select value={e.paidBy} onChange={(v) => upd("expenses", i, "paidBy", Number(v))} className="bg-slate-100">
+                            <Select value={e.paidBy} onChange={(v) => upd("expenses", i, "paidBy", Number(v))} className={fund ? "bg-emerald-100 text-emerald-700 font-medium" : "bg-slate-100"}>
+                              <option value={FUND}>Group fund</option>
                               {people.map((p, j) => (
                                 <option key={j} value={j}>
                                   {p.name}
@@ -766,12 +785,18 @@ export default function App() {
                             </div>
                           </td>
                           <td className="px-3 text-center">
-                            <button
-                              onClick={() => upd("expenses", i, "settled", !e.settled)}
-                              className={`w-5 h-5 rounded border-2 inline-flex items-center justify-center transition ${e.settled ? "bg-emerald-500 border-emerald-500 text-white" : "border-slate-300 hover:border-emerald-400"}`}
-                            >
-                              {e.settled && <Check size={13} strokeWidth={3} />}
-                            </button>
+                            {fund ? (
+                              <span title="Paid from the group fund, so there's nothing to settle" className="text-xs text-slate-300">
+                                —
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() => upd("expenses", i, "settled", !e.settled)}
+                                className={`w-5 h-5 rounded border-2 inline-flex items-center justify-center transition ${e.settled ? "bg-emerald-500 border-emerald-500 text-white" : "border-slate-300 hover:border-emerald-400"}`}
+                              >
+                                {e.settled && <Check size={13} strokeWidth={3} />}
+                              </button>
+                            )}
                           </td>
                           <td className="px-2">
                             <Del onClick={() => del("expenses", i)} />
@@ -788,13 +813,89 @@ export default function App() {
               >
                 <Plus size={16} /> Add expense
               </Btn>
-              <p className="text-xs text-slate-400 -mt-2">Tap the circles to choose who shares each expense, e.g. 2 Grab cars = 2 rows, each with its own group.</p>
+              <p className="text-xs text-slate-400 -mt-2">Tap the circles to choose who shares each expense, e.g. 2 Grab cars = 2 rows, each with its own group. Pick "Group fund" in Paid by for anything paid from the savings pot.</p>
+
+              {/* Group fund */}
+              <div className="bg-white rounded-xl border border-slate-200 p-4">
+                <div className="text-sm font-semibold text-slate-700 flex items-center gap-2 mb-4">
+                  <PiggyBank size={16} className="text-emerald-500" /> Group fund
+                  <span className="font-normal text-slate-400">· the savings pot from the Save tab</span>
+                </div>
+
+                <div className="grid grid-cols-3 gap-3 mb-4">
+                  <div className="rounded-lg bg-slate-50 p-3">
+                    <div className="text-xs text-slate-500">Collected</div>
+                    <div className="text-lg font-semibold text-slate-800">{fmt(totalSaved)}</div>
+                  </div>
+                  <div className="rounded-lg bg-slate-50 p-3">
+                    <div className="text-xs text-slate-500">Spent from fund</div>
+                    <div className="text-lg font-semibold text-slate-800">{fmt(fundSpent)}</div>
+                    <div className="text-xs text-slate-400">
+                      {fundExpenses.length} expense{fundExpenses.length === 1 ? "" : "s"}
+                    </div>
+                  </div>
+                  <div className={`rounded-lg p-3 ${fundLeft < -homeEps ? "bg-rose-50" : "bg-emerald-50"}`}>
+                    <div className={`text-xs ${fundLeft < -homeEps ? "text-rose-600" : "text-emerald-700"}`}>Left in fund</div>
+                    <div className={`text-lg font-semibold ${fundLeft < -homeEps ? "text-rose-600" : "text-emerald-700"}`}>
+                      {fundLeft < -homeEps ? "−" : ""}
+                      {fmt(Math.abs(fundLeft))}
+                    </div>
+                  </div>
+                </div>
+
+                {fundExpenses.length === 0 && <p className="text-xs text-slate-400 mb-3">Nothing has been paid from the fund yet. Pick "Group fund" in an expense's Paid by column and it'll show up here.</p>}
+                {fundUnassigned > 0 && (
+                  <p className="text-xs text-rose-500 mb-3">
+                    {fundUnassigned} fund expense{fundUnassigned === 1 ? " has" : "s have"} no one in the split, so {fundUnassigned === 1 ? "it isn't" : "they aren't"} counted in anyone's balance.
+                  </p>
+                )}
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm min-w-max">
+                    <thead className="border-b border-slate-200">
+                      <tr>
+                        <TH className="pl-0">Traveler</TH>
+                        <TH className="text-right">Saved</TH>
+                        <TH className="text-right">Share of fund spending</TH>
+                        <TH className="text-right pr-0">Balance</TH>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {people.map((p, i) => {
+                        const saved = personTotal(p);
+                        const bal = saved - fundShare[i];
+                        return (
+                          <tr key={i}>
+                            <td className="py-2">
+                              <div className="flex items-center gap-2">
+                                <Avatar name={p.name} i={i} size="w-6 h-6 text-xs" /> <span className="font-medium">{p.name}</span>
+                              </div>
+                            </td>
+                            <td className="px-3 text-right">{fmt(saved)}</td>
+                            <td className="px-3 text-right text-slate-500">{fmt(fundShare[i])}</td>
+                            <td className="pl-3 text-right">
+                              {Math.abs(bal) < homeEps ? (
+                                <span className="text-xs text-slate-400">Even</span>
+                              ) : bal > 0 ? (
+                                <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">+{fmt(bal)} left</span>
+                              ) : (
+                                <span className="text-xs px-2 py-0.5 rounded-full bg-rose-50 text-rose-600">Top up {fmt(-bal)}</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="text-xs text-slate-400 mt-3">Balance = what they saved minus their share of everything paid from the fund. Whatever's left at the end goes back to each person by their balance.</p>
+              </div>
 
               {/* Settle up */}
               <div className="bg-white rounded-xl border border-slate-200 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
                   <div className="text-sm font-semibold text-slate-700">
-                    Settle up <span className="font-normal text-slate-400">· who pays whom</span>
+                    Settle up <span className="font-normal text-slate-400">· who pays whom, for things paid personally</span>
                   </div>
                   <div className="flex bg-slate-100 rounded-lg p-0.5 text-xs font-medium">
                     <button onClick={() => setSettleMode("separate")} className={`px-3 py-1.5 rounded-md ${settleMode === "separate" ? "bg-white shadow-sm text-slate-800" : "text-slate-500"}`}>
