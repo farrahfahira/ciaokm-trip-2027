@@ -225,8 +225,89 @@ export function ItineraryMobile({ days, setDays }) {
 }
 
 // ── Nabung versi HP ──
+// ── Kotak isi setoran (muncul di tengah) ──
+export function AmountDialog({ title, subtitle, value, monthly, fmt, onSave, onClose }) {
+  const [v, setV] = useState(value === "" || value == null ? "" : String(value));
+  const inputRef = useRef(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  useEffect(() => {
+    inputRef.current?.focus();
+    const onKey = (e) => {
+      if (e.key === "Escape") closeRef.current();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const n = num(v);
+  const had = num(value) > 0;
+  const save = () => {
+    onSave(n > 0 ? n : "");
+    onClose();
+  };
+  const remove = () => {
+    if (confirm("Hapus setoran ini?")) {
+      onSave("");
+      onClose();
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          save();
+        }}
+        onClick={(e) => e.stopPropagation()}
+        className="bg-white w-full max-w-sm rounded-2xl p-5 space-y-4"
+      >
+        <div>
+          <div className="text-base font-semibold text-slate-800">{title}</div>
+          <div className="text-sm text-slate-500">{subtitle}</div>
+        </div>
+
+        <div className="text-3xl font-bold text-slate-800 tabular-nums">{n > 0 ? fmt(n) : <span className="text-slate-300">{fmt(0)}</span>}</div>
+
+        <input
+          ref={inputRef}
+          type="number"
+          inputMode="numeric"
+          value={v}
+          onChange={(e) => setV(e.target.value)}
+          placeholder="Ketik jumlahnya"
+          className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-300 placeholder:text-slate-400"
+        />
+
+        {monthly > 0 && n !== monthly && (
+          <button type="button" onClick={() => setV(String(monthly))} className="text-sm font-medium text-emerald-700 bg-emerald-50 active:bg-emerald-100 px-3 py-2 rounded-lg">
+            Minimal {fmt(monthly)}
+          </button>
+        )}
+
+        <div className="flex items-center gap-2 pt-1">
+          {had && (
+            <button type="button" onClick={remove} className="text-sm text-slate-400 active:text-rose-500 px-2 py-2.5">
+              Hapus
+            </button>
+          )}
+          <button type="button" onClick={onClose} className="ml-auto text-sm text-slate-500 px-4 py-2.5 rounded-lg active:bg-slate-100">
+            Batal
+          </button>
+          <button type="submit" className="text-sm font-medium text-white bg-emerald-500 active:bg-emerald-600 px-6 py-2.5 rounded-lg">
+            Simpan
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+// ── Nabung versi HP ──
 export function SaveMobile({ people, activeIdx, monthLabels, curIdx, monthly, monthsOf, personTotal, updMonth, fmt }) {
-  const [open, setOpen] = useState(null);
+  const [open, setOpen] = useState(null); // orang yang bulan-bulannya lagi dibuka
+  const [amountEdit, setAmountEdit] = useState(null); // { i, k } yang lagi diisi
   const inPeriod = curIdx >= 0 && curIdx < monthLabels.length;
   const monthName = (k) => `${monthLabels[k].short} '${monthLabels[k].year}`;
 
@@ -236,27 +317,21 @@ export function SaveMobile({ people, activeIdx, monthLabels, curIdx, monthly, mo
     return k < curIdx ? "missed" : "upcoming";
   };
   const dot = { paid: "bg-emerald-400", low: "bg-amber-400", missed: "bg-rose-300", upcoming: "bg-slate-200" };
-  const tint = { paid: "border-emerald-200 bg-emerald-50", low: "border-amber-200 bg-amber-50", missed: "border-rose-200 bg-rose-50", upcoming: "border-slate-200 bg-slate-50" };
+  const textTint = { paid: "text-emerald-700", low: "text-amber-700", missed: "text-rose-500", upcoming: "text-slate-300" };
 
-  const AmountInput = ({ i, k }) => {
-    const v = people[i].months[k] ?? "";
+  const AmountText = ({ i, k }) => {
+    const v = people[i].months[k];
+    const st = state(v, k);
+    return <span className={`text-sm font-semibold tabular-nums text-right ${textTint[st]}`}>{num(v) > 0 ? fmt(v) : st === "missed" ? "Bolong" : "–"}</span>;
+  };
+  const EditBtn = ({ i, k }) => {
+    const has = num(people[i].months[k]) > 0;
     return (
-      <input
-        type="number"
-        inputMode="numeric"
-        value={v}
-        placeholder="0"
-        onChange={(e) => updMonth(i, k, e.target.value === "" ? "" : Number(e.target.value))}
-        className={`w-32 text-right text-base border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-300 ${tint[state(v, k)]}`}
-      />
+      <button onClick={() => setAmountEdit({ i, k })} className={`w-16 shrink-0 text-xs font-medium py-2 rounded-lg ${has ? "text-slate-500 bg-slate-100 active:bg-slate-200" : "text-emerald-700 bg-emerald-50 active:bg-emerald-100"}`}>
+        {has ? "Ubah" : "Isi"}
+      </button>
     );
   };
-  const FillMin = ({ i, k }) =>
-    monthly > 0 && !num(people[i].months[k]) ? (
-      <button onClick={() => updMonth(i, k, monthly)} className="text-xs font-medium text-emerald-700 bg-emerald-50 active:bg-emerald-100 px-2.5 py-2 rounded-lg">
-        Isi
-      </button>
-    ) : null;
 
   return (
     <div className="space-y-4">
@@ -268,11 +343,11 @@ export function SaveMobile({ people, activeIdx, monthLabels, curIdx, monthly, mo
           </div>
           <div className="space-y-2.5">
             {activeIdx.map((i) => (
-              <div key={people[i].id || i} className="flex items-center gap-2.5">
+              <div key={people[i].id || i} className="flex items-center gap-3">
                 <Avatar name={people[i].name} i={i} photo={people[i].photo} size="w-8 h-8 text-xs" />
                 <span className="flex-1 min-w-0 truncate text-sm font-medium text-slate-700">{people[i].name}</span>
-                <FillMin i={i} k={curIdx} />
-                <AmountInput i={i} k={curIdx} />
+                <AmountText i={i} k={curIdx} />
+                <EditBtn i={i} k={curIdx} />
               </div>
             ))}
           </div>
@@ -314,19 +389,31 @@ export function SaveMobile({ people, activeIdx, monthLabels, curIdx, monthly, mo
             </div>
           }
         >
-          <div className="space-y-2">
+          <div className="space-y-1">
             {monthLabels.map((_, k) => (
-              <div key={k} className={`flex items-center gap-2.5 rounded-lg px-1 py-1 ${k === curIdx ? "bg-emerald-50/60" : ""}`}>
+              <div key={k} className={`flex items-center gap-3 rounded-lg px-2 py-1.5 ${k === curIdx ? "bg-emerald-50/60" : ""}`}>
                 <div className="flex-1 text-sm text-slate-600">
                   {monthName(k)}
                   {k === curIdx && <span className="ml-2 text-[11px] font-medium text-emerald-700">bulan ini</span>}
                 </div>
-                <FillMin i={open} k={k} />
-                <AmountInput i={open} k={k} />
+                <AmountText i={open} k={k} />
+                <EditBtn i={open} k={k} />
               </div>
             ))}
           </div>
         </Sheet>
+      )}
+
+      {amountEdit && people[amountEdit.i] && (
+        <AmountDialog
+          title={`Setoran ${people[amountEdit.i].name}`}
+          subtitle={monthName(amountEdit.k)}
+          value={people[amountEdit.i].months[amountEdit.k] ?? ""}
+          monthly={monthly}
+          fmt={fmt}
+          onSave={(nv) => updMonth(amountEdit.i, amountEdit.k, nv)}
+          onClose={() => setAmountEdit(null)}
+        />
       )}
     </div>
   );
